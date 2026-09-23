@@ -41,6 +41,9 @@ export const viewport: Viewport = {
   themeColor: "#e11d48",
   width: "device-width",
   initialScale: 1,
+  // Konten boleh menembus area notch/home-indicator (khususnya PWA iOS);
+  // padding aman ditambahkan oleh app-shell via env(safe-area-inset-*).
+  viewportFit: "cover",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

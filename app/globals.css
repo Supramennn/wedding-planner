@@ -12,12 +12,27 @@
   --foreground: #171717;
 }
 
+html {
+  /* Cegah font "mengembang" sendiri di Android. */
+  -webkit-text-size-adjust: 100%;
+}
+
 body {
   background: var(--background);
   color: var(--foreground);
   font-family: var(--font-geist-sans), ui-sans-serif, system-ui, -apple-system,
     "Segoe UI", sans-serif;
   -webkit-tap-highlight-color: transparent;
+  /* Tidak ada scroll horizontal nyasar di layar sempit. */
+  overflow-x: hidden;
+}
+
+/* Media tidak boleh melebihi lebar layar (rasio asli dipertahankan). */
+img,
+video,
+canvas {
+  max-width: 100%;
+  height: auto;
 }
 
 /* Mobile-first: mencegah zoom otomatis iOS saat fokus input < 16px */
