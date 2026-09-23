@@ -18,14 +18,14 @@ import { getDb, isFirebaseConfigured } from "@/lib/firebase";
  * sehingga tidak ada setState sinkron di dalam effect.
  */
 export function useCollection<T extends { id: string }>(
-  path: string[] | null,
+  path: string | null,
   options: { orderBy?: { field: string; direction?: OrderByDirection } } = {}
 ): {
   items: T[];
   loading: boolean;
   error: string | null;
 } {
-  const pathKey = path ? path.join("/") : null;
+  const pathKey = path;
   const orderField = options.orderBy?.field ?? null;
   const orderDirection = options.orderBy?.direction ?? "asc";
 

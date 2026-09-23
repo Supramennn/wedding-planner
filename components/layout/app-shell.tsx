@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
  */
 const NAV_ITEMS = [
   { href: "/dashboard", label: "Dasbor" },
+  { href: "/checklist", label: "Checklist" },
   { href: "/settings", label: "Pengaturan" },
 ] as const;
 
