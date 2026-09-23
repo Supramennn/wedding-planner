@@ -56,3 +56,12 @@ export function getBudgetLevel(spentRatio: number): BudgetLevel {
   if (spentRatio >= BUDGET_THRESHOLDS.green) return "yellow";
   return "green";
 }
+
+/** Warna badge per status vendor (dipakai dashboard & timeline). */
+export const VENDOR_STATUS_TONES = {
+  dihubungi: "neutral",
+  nego: "amber",
+  deal: "sky",
+  dp: "violet",
+  lunas: "emerald",
+} as const satisfies Record<(typeof VENDOR_STATUSES)[number], string>;

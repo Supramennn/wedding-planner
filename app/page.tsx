@@ -6,17 +6,23 @@ import { useAuth } from "@/lib/hooks/auth-context";
 import { Spinner } from "@/components/ui/spinner";
 
 /**
- * Halaman depan: arahkan user ke dashboard bila sudah login,
- * ke halaman login bila belum.
+ * Halaman depan: arahkan user ke dashboard bila sudah login
+ * (atau ke onboarding bila belum), ke halaman login bila belum login.
  */
 export default function HomePage() {
-  const { user, loading } = useAuth();
+  const { user, loading, profileLoading, isOnboarded } = useAuth();
   const router = useRouter();
 
+  const ready = !loading && (!user || !profileLoading);
+
   useEffect(() => {
-    if (loading) return;
-    router.replace(user ? "/dashboard" : "/login");
-  }, [loading, user, router]);
+    if (!ready) return;
+    if (!user) {
+      router.replace("/login");
+      return;
+    }
+    router.replace(isOnboarded ? "/dashboard" : "/onboarding");
+  }, [ready, user, isOnboarded, router]);
 
   return (
     <main className="flex min-h-[100svh] flex-col items-center justify-center gap-4">

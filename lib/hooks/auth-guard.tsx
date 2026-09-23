@@ -21,12 +21,15 @@ export function AuthGuard({
   /** true → paksa ke /onboarding bila profil belum punya weddingDate (FR-02). */
   requireOnboarded?: boolean;
 }) {
-  const { user, profile, loading, isOnboarded } = useAuth();
+  const { user, loading, profileLoading, isOnboarded } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
 
+  // Tunggu auth + snapshot profil pertama agar keputusan redirect sekali jalan.
+  const ready = !loading && (!user || !profileLoading);
+
   useEffect(() => {
-    if (loading) return;
+    if (!ready) return;
     if (!user) {
       router.replace(`/login?next=${encodeURIComponent(pathname)}`);
       return;
@@ -34,18 +37,12 @@ export function AuthGuard({
     if (requireOnboarded && !isOnboarded) {
       router.replace("/onboarding");
     }
-  }, [loading, user, isOnboarded, requireOnboarded, pathname, router]);
+  }, [ready, user, isOnboarded, requireOnboarded, pathname, router]);
 
-  if (loading || !user || (requireOnboarded && !isOnboarded)) {
-    return (
-      <div className="flex min-h-[60svh] items-center justify-center">
-        <Spinner size="lg" label="Memuat…" />
-      </div>
-    );
-  }
+  const shouldWait =
+    !ready || !user || (requireOnboarded && !isOnboarded);
 
-  // Sembunyikan konten lama sampai redirect ke onboarding selesai.
-  if (requireOnboarded && !profile) {
+  if (shouldWait) {
     return (
       <div className="flex min-h-[60svh] items-center justify-center">
         <Spinner size="lg" label="Memuat…" />

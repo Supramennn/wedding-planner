@@ -2,7 +2,6 @@
 
 import { useState, type FormEvent } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import {
   GoogleAuthProvider,
   createUserWithEmailAndPassword,
@@ -22,7 +21,6 @@ import { Input } from "@/components/ui/input";
 import { GoogleButton } from "@/components/auth/google-button";
 
 export default function RegisterPage() {
-  const router = useRouter();
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -56,8 +54,7 @@ export default function RegisterPage() {
       await ensureUserProfile(credential.user, {
         displayName: name.trim(),
       });
-      // Fase 2: alihkan ke wizard onboarding (FR-02).
-      router.replace("/dashboard");
+      // Destinasi (onboarding utk user baru) ditentukan GuestGuard (FR-02).
     } catch (error) {
       setFormError(mapAuthError(error));
     } finally {
@@ -74,8 +71,6 @@ export default function RegisterPage() {
         new GoogleAuthProvider()
       );
       await ensureUserProfile(result.user);
-      // Fase 2: alihkan ke wizard onboarding (FR-02).
-      router.replace("/dashboard");
     } catch (error) {
       setFormError(mapAuthError(error));
     } finally {

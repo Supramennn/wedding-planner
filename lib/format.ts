@@ -11,16 +11,27 @@ export function formatIDR(amount: number): string {
   return idrFormatter.format(Number.isFinite(amount) ? amount : 0);
 }
 
-/** 23 Sep 2026 */
-export function formatDateID(isoDate: string): string {
+/** 23 Sep 2026, atau "23 Oktober 2026" bila style = "long". */
+export function formatDateID(
+  isoDate: string,
+  style: "short" | "long" = "short"
+): string {
   if (!isoDate) return "-";
   const date = new Date(`${isoDate}T00:00:00`);
   if (Number.isNaN(date.getTime())) return "-";
   return new Intl.DateTimeFormat("id-ID", {
     day: "numeric",
-    month: "short",
+    month: style === "long" ? "long" : "short",
     year: "numeric",
   }).format(date);
+}
+
+/** Date -> "YYYY-MM-DD" (untuk input date & penyimpanan Firestore). */
+export function toISODate(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 /**

@@ -7,18 +7,20 @@ import { Spinner } from "@/components/ui/spinner";
 
 /**
  * GuestGuard — untuk halaman auth (login/register).
- * Jika sudah login, alihkan ke dashboard supaya user tidak
- * melihat form login dua kali.
+ * Jika sudah login, alihkan ke dashboard (FR-02: user baru → onboarding).
  */
 export function GuestGuard({ children }: { children: ReactNode }) {
-  const { user, loading } = useAuth();
+  const { user, loading, profileLoading, isOnboarded } = useAuth();
   const router = useRouter();
 
-  useEffect(() => {
-    if (!loading && user) router.replace("/dashboard");
-  }, [loading, user, router]);
+  const ready = !loading && (!user || !profileLoading);
 
-  if (loading) {
+  useEffect(() => {
+    if (!ready || !user) return;
+    router.replace(isOnboarded ? "/dashboard" : "/onboarding");
+  }, [ready, user, isOnboarded, router]);
+
+  if (!ready) {
     return (
       <div className="flex min-h-[60svh] items-center justify-center">
         <Spinner size="lg" label="Memuat…" />

@@ -8,11 +8,11 @@ export const metadata: Metadata = {
 
 /**
  * Rute terproteksi. Guard via layout (lihat catatan di auth-guard.tsx).
- * Fase 2: aktifkan requireOnboarded setelah halaman /onboarding ada.
+ * requireOnboarded: user tanpa data pernikahan dipaksa ke wizard (FR-02).
  */
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   return (
-    <AuthGuard>
+    <AuthGuard requireOnboarded>
       <AppShell>{children}</AppShell>
     </AuthGuard>
   );

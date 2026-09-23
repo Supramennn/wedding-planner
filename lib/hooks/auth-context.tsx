@@ -25,6 +25,8 @@ interface AuthContextValue {
   profile: UserProfile | null;
   /** true selama menunggu status auth pertama. */
   loading: boolean;
+  /** true selama menunggu snapshot profil pertama (user sudah login). */
+  profileLoading: boolean;
   /** true bila seluruh field profil (termasuk weddingDate) sudah terisi. */
   isOnboarded: boolean;
   signOutUser: () => Promise<void>;
@@ -35,6 +37,8 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
+  /** uid yang profilnya sudah ter-load (null = belum ada snapshot). */
+  const [profileKey, setProfileKey] = useState<string | null>(null);
   // Loading awal mengikuti ketersediaan konfigurasi (.env.local) — bukan
   // diset di dalam effect, agar tidak ada cascade render.
   const [loading, setLoading] = useState(() => isFirebaseConfigured);
@@ -46,7 +50,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const auth = getFirebaseAuth();
     const unsubscribe = onAuthStateChanged(auth, (nextUser) => {
       setUser(nextUser);
-      if (!nextUser) setProfile(null);
+      setProfile(null);
+      setProfileKey(null);
       setLoading(false);
     });
 
@@ -61,29 +66,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       doc(getDb(), "users", user.uid),
       (snapshot) => {
         setProfile(snapshot.exists() ? (snapshot.data() as UserProfile) : null);
+        setProfileKey(user.uid);
       },
       () => {
-        // Error jaringan/rules: biarkan profile null, modul menampilkan empty state.
+        // Error jaringan/rules: hentikan loading, modul menampilkan empty state.
         setProfile(null);
+        setProfileKey(user.uid);
       }
     );
 
     return unsubscribe;
   }, [user]);
 
-  const value = useMemo<AuthContextValue>(
-    () => ({
+  const value = useMemo<AuthContextValue>(() => {
+    const profileLoading = Boolean(
+      isFirebaseConfigured && user && profileKey !== user.uid
+    );
+
+    return {
       user,
       profile,
       loading,
+      profileLoading,
       isOnboarded: Boolean(profile?.weddingDate),
       signOutUser: async () => {
         if (!isFirebaseConfigured) return;
         await signOut(getFirebaseAuth());
       },
-    }),
-    [user, profile, loading]
-  );
+    };
+  }, [user, profile, profileKey, loading]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

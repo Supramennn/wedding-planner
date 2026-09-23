@@ -2,7 +2,6 @@
 
 import { useState, type FormEvent } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import {
   GoogleAuthProvider,
   signInWithEmailAndPassword,
@@ -22,7 +21,6 @@ import { Input } from "@/components/ui/input";
 import { GoogleButton } from "@/components/auth/google-button";
 
 export default function LoginPage() {
-  const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [fieldErrors, setFieldErrors] = useState<{
@@ -45,8 +43,9 @@ export default function LoginPage() {
     setLoading(true);
     setFormError(null);
     try {
+      // Destinasi (dashboard vs onboarding) ditentukan GuestGuard
+      // setelah status auth + profil siap (FR-02).
       await signInWithEmailAndPassword(getFirebaseAuth(), email, password);
-      router.replace("/dashboard");
     } catch (error) {
       setFormError(mapAuthError(error));
     } finally {
@@ -63,7 +62,6 @@ export default function LoginPage() {
         new GoogleAuthProvider()
       );
       await ensureUserProfile(result.user);
-      router.replace("/dashboard");
     } catch (error) {
       setFormError(mapAuthError(error));
     } finally {

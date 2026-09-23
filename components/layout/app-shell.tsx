@@ -2,18 +2,24 @@
 
 import { type ReactNode } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "@/lib/hooks/auth-context";
 import { Button } from "@/components/ui/button";
 
 /**
  * Shell aplikasi untuk rute terproteksi: header + konten.
- * Navigasi modul (Dashboard/Checklist/Budget/Vendor) ditambahkan saat
- * modulnya tersedia agar tidak ada link mati.
+ * Daftar menu diperpanjang saat modul Checklist/Budget/Vendor tersedia
+ * (tidak ada link ke rute yang belum ada).
  */
+const NAV_ITEMS = [
+  { href: "/dashboard", label: "Dasbor" },
+  { href: "/settings", label: "Pengaturan" },
+] as const;
+
 export function AppShell({ children }: { children: ReactNode }) {
   const { user, signOutUser } = useAuth();
   const router = useRouter();
+  const pathname = usePathname();
 
   async function handleSignOut() {
     await signOutUser();
@@ -24,12 +30,34 @@ export function AppShell({ children }: { children: ReactNode }) {
     <div className="flex min-h-[100svh] flex-col">
       <header className="sticky top-0 z-40 border-b border-neutral-200 bg-white/90 backdrop-blur">
         <div className="mx-auto flex h-14 w-full max-w-5xl items-center justify-between gap-3 px-4">
-          <Link
-            href="/dashboard"
-            className="text-lg font-semibold tracking-tight text-rose-600"
-          >
-            WedPlan
-          </Link>
+          <div className="flex items-center gap-4">
+            <Link
+              href="/dashboard"
+              className="text-lg font-semibold tracking-tight text-rose-600"
+            >
+              WedPlan
+            </Link>
+            <nav aria-label="Menu utama" className="flex items-center gap-1">
+              {NAV_ITEMS.map((item) => {
+                const active = pathname.startsWith(item.href);
+                return (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    aria-current={active ? "page" : undefined}
+                    className={`rounded-lg px-2 py-1.5 text-sm transition-colors ${
+                      active
+                        ? "bg-rose-50 font-medium text-rose-700"
+                        : "text-neutral-600 hover:bg-neutral-100 hover:text-neutral-900"
+                    }`}
+                  >
+                    {item.label}
+                  </Link>
+                );
+              })}
+            </nav>
+          </div>
+
           <div className="flex items-center gap-2">
             {user?.email && (
               <span

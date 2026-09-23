@@ -1,29 +1,27 @@
-import { Card, CardDescription, CardTitle } from "@/components/ui/card";
-import { EmptyState } from "@/components/ui/empty-state";
 import { WelcomeSummary } from "@/components/dashboard/welcome-summary";
+import { CountdownCard } from "@/components/dashboard/countdown-card";
+import { ChecklistProgressCard } from "@/components/dashboard/checklist-progress-card";
+import { BudgetSummaryCard } from "@/components/dashboard/budget-summary-card";
+import { VendorStatusCard } from "@/components/dashboard/vendor-status-card";
 
 /**
- * Dashboard ringkasan (FR-04 s/d FR-07) — konten penuh dibangun di Fase 2.
- * Fase 1: halaman terproteksi sudah bisa diakses setelah login.
+ * Dashboard ringkasan (FR-04 s/d FR-07):
+ * - FR-04 countdown hari-H
+ * - FR-05 % checklist selesai
+ * - FR-06 budget terpakai vs alokasi (indikator warna FR-16)
+ * - FR-07 jumlah vendor per status
  */
 export default function DashboardPage() {
   return (
     <div className="space-y-4">
       <WelcomeSummary />
 
-      <Card>
-        <CardTitle>Ringkasan persiapan</CardTitle>
-        <CardDescription>
-          Countdown, progress checklist, budget, dan status vendor akan
-          tampil di sini.
-        </CardDescription>
-        <div className="mt-4">
-          <EmptyState
-            title="Belum ada data persiapan"
-            description="Lengkapi data pernikahanmu untuk melihat ringkasan persiapan."
-          />
-        </div>
-      </Card>
+      <div className="grid gap-4 sm:grid-cols-2">
+        <CountdownCard />
+        <ChecklistProgressCard />
+        <BudgetSummaryCard />
+        <VendorStatusCard />
+      </div>
     </div>
   );
 }
