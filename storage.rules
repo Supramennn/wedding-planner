@@ -1,0 +1,15 @@
+rules_version = '2';
+
+// WedPlan — Firebase Storage Rules
+// Struk pengeluaran disimpan per user: users/{uid}/receipts/...
+// Hanya pemilik yang boleh baca/tulis; user lain DENY.
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /users/{userId}/{allPaths=**} {
+      allow read, write: if request.auth != null
+                         && request.auth.uid == userId
+                         && request.resource.size < 5 * 1024 * 1024;
+      allow read: if request.auth != null && request.auth.uid == userId;
+    }
+  }
+}

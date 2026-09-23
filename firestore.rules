@@ -1,0 +1,37 @@
+rules_version = '2';
+
+// WedPlan — Firestore Security Rules
+// Prinsip: user hanya boleh read/write data di bawah users/{ownUserId}.
+// Tidak ada rule allow lain => path lain otomatis DENY (default deny).
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    // Profil pernikahan (sumber tunggal data onboarding)
+    match /users/{userId} {
+      allow read, write: if isOwner(userId);
+
+      // Checklist persiapan
+      match /checklist/{itemId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      // Budget per kategori (expenses adalah array field di dokumen ini)
+      match /budget/{categoryId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      // Timeline vendor
+      match /vendors/{vendorId} {
+        allow read, write: if isOwner(userId);
+      }
+    }
+  }
+}
