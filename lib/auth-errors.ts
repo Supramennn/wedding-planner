@@ -33,6 +33,12 @@ export function mapAuthError(error: unknown): string {
       return "Gagal terhubung. Periksa koneksi internet Anda.";
     case "auth/operation-not-allowed":
       return "Metode login belum diaktifkan di Firebase Console.";
+    case "auth/unauthorized-domain":
+      return (
+        "Domain aplikasi ini belum diizinkan untuk login Google. " +
+        "Tambahkan domainnya di Firebase Console → Authentication → " +
+        "Settings → Authorized domains."
+      );
     default:
       break;
   }
