@@ -15,6 +15,7 @@ const NAV_ITEMS = [
   { href: "/dashboard", label: "Dasbor" },
   { href: "/checklist", label: "Checklist" },
   { href: "/budget", label: "Budget" },
+  { href: "/vendors", label: "Vendor" },
   { href: "/settings", label: "Pengaturan" },
 ] as const;
 
