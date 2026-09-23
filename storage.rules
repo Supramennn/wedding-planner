@@ -2,14 +2,27 @@ rules_version = '2';
 
 // WedPlan — Firebase Storage Rules
 // Struk pengeluaran disimpan per user: users/{uid}/receipts/...
-// Hanya pemilik yang boleh baca/tulis; user lain DENY.
+// Prinsip: hanya pemilik yang boleh baca/tulis/hapus; user lain DENY.
+//
+// Catatan pemisahan rule:
+// - request.resource.size hanya valid saat WRITE (upload); pada READ/DELETE
+//   request.resource = null → evaluasi propertinya error dan menolak operasi.
+//   Karena itu read/write/delete dipisah menjadi allow terpisah.
 service firebase.storage {
   match /b/{bucket}/o {
+
+    function isOwner(userId) {
+      return request.auth != null && request.auth.uid == userId;
+    }
+
     match /users/{userId}/{allPaths=**} {
-      allow read, write: if request.auth != null
-                         && request.auth.uid == userId
-                         && request.resource.size < 5 * 1024 * 1024;
-      allow read: if request.auth != null && request.auth.uid == userId;
+      // Baca struk milik sendiri (mis. tombol "Lihat struk").
+      allow read: if isOwner(userId);
+      // Upload: maksimal 5 MB (sinkron dengan validasi di aplikasi).
+      allow write: if isOwner(userId)
+                   && request.resource.size < 5 * 1024 * 1024;
+      // Hapus file struk (dipanggil saat pengeluaran dihapus).
+      allow delete: if isOwner(userId);
     }
   }
 }
