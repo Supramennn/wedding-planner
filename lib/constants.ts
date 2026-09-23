@@ -65,3 +65,10 @@ export const VENDOR_STATUS_TONES = {
   dp: "violet",
   lunas: "emerald",
 } as const satisfies Record<(typeof VENDOR_STATUSES)[number], string>;
+
+/** Pesan indikator warna budget (FR-16) — dipakai dashboard & modul budget. */
+export const BUDGET_LEVEL_MESSAGES: Record<BudgetLevel, string> = {
+  green: "Masih aman — terpakai di bawah 70%.",
+  yellow: "Hati-hati — sudah terpakai 70% atau lebih.",
+  red: "Over budget — pengeluaran sudah ≥ 100% alokasi.",
+};

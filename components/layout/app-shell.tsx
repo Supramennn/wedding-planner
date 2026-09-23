@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 const NAV_ITEMS = [
   { href: "/dashboard", label: "Dasbor" },
   { href: "/checklist", label: "Checklist" },
+  { href: "/budget", label: "Budget" },
   { href: "/settings", label: "Pengaturan" },
 ] as const;
 

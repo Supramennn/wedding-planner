@@ -20,6 +20,12 @@ export interface UserProfile {
   /** ISO date "YYYY-MM-DD". Kosong = onboarding belum selesai. */
   weddingDate: string;
   venue: string;
+  /**
+   * Total budget pernikahan (FR-12). Field tambahan di atas skema dasar
+   * PRD Section 8 — sesuai NFR "siap ditambah field baru tanpa migrasi".
+   * Absen/0 = belum ditetapkan.
+   */
+  totalBudget?: number;
   /** Epoch ms. */
   createdAt: number;
 }

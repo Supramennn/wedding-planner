@@ -52,3 +52,18 @@ export function toPercent(used: number, total: number): number {
   if (!total || total <= 0) return 0;
   return Math.min(100, Math.max(0, Math.round((used / total) * 100)));
 }
+
+/** "Rp 1.500.000.000" -> 1500000000 (input bebas format). */
+export function parseAmount(raw: string): number {
+  const digits = raw.replace(/[^\d]/g, "");
+  const value = Number(digits);
+  return Number.isFinite(value) ? value : 0;
+}
+
+/** Rp 15 jt (untuk sumbu chart). */
+export function formatIDRCompact(amount: number): string {
+  return new Intl.NumberFormat("id-ID", {
+    notation: "compact",
+    maximumFractionDigits: 1,
+  }).format(Number.isFinite(amount) ? amount : 0);
+}
