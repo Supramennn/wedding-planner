@@ -25,6 +25,7 @@ import {
   createUserWithEmailAndPassword,
   getAuth,
   connectAuthEmulator,
+  signInWithEmailAndPassword,
   signOut,
 } from "firebase/auth";
 import {
@@ -50,7 +51,13 @@ const useEmulator =
 const stamp = Date.now();
 
 const config = useEmulator
-  ? { projectId: "demo-wedplan", apiKey: "demo-api-key", appId: "demo-app-id" }
+  ? {
+      projectId: "demo-wedplan",
+      apiKey: "demo-api-key",
+      appId: "demo-app-id",
+      // Storage SDK tetap butuh nama bucket meski lewat emulator.
+      storageBucket: "demo-wedplan.appspot.com",
+    }
   : {
       apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
       authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
@@ -90,12 +97,15 @@ function report(ok, label, detail = "") {
   console.log(`[${mark}] ${label}${detail ? ` — ${detail}` : ""}`);
 }
 
+/** Kode error yang berarti "rules menolak" (Firestore & Storage beda kode). */
+const DENY_CODES = new Set(["permission-denied", "storage/unauthorized"]);
+
 async function expectDenied(label, promise) {
   try {
     await promise;
     report(false, label, "akses diterima, seharusnya DENY");
   } catch (error) {
-    if (error?.code === "permission-denied") {
+    if (DENY_CODES.has(error?.code)) {
       report(true, label);
     } else {
       report(false, label, `error tak terduga: ${error?.code ?? error}`);
@@ -190,10 +200,13 @@ await expectDenied(
 );
 
 // --- Cleanup (best-effort) ---------------------------------------------
+// Hapus data uji sebagai A (owner) — saat ini user aktif masih B,
+// sehingga menghapus data A akan ditolak rules (justru bukti isolasi).
 try {
+  await signInWithEmailAndPassword(auth, emailA, "Test-Rules-123");
   await deleteDoc(doc(db, "users", uidA));
 } catch {
-  /* sudah ditolak rules / sudah bersih */
+  /* dokumen mungkin sudah tidak ada / gagal signIn uji */
 }
 try {
   await deleteObject(ref(storage, ownPath));

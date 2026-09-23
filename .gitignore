@@ -24,7 +24,11 @@
 .DS_Store
 *.pem
 
+# JRE portable untuk Firebase emulator (lokal saja)
+/.tools/
+
 # debug
+*-debug.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
