@@ -8,11 +8,11 @@ import { NumberInput } from "@/components/ui/number-input";
 
 /** Form set/edit total budget pernikahan (FR-12). */
 export function TotalBudgetForm({
-  uid,
+  weddingId,
   current,
   onClose,
 }: {
-  uid: string;
+  weddingId: string;
   current: number;
   onClose: () => void;
 }) {
@@ -34,7 +34,7 @@ export function TotalBudgetForm({
 
     setSaving(true);
     try {
-      await setTotalBudget(uid, parsed);
+      await setTotalBudget(weddingId, parsed);
       onClose();
     } catch {
       setError("Gagal menyimpan. Periksa koneksi internet Anda.");

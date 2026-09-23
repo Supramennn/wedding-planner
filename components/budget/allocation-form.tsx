@@ -13,13 +13,13 @@ type Mode = "amount" | "percent";
  * persentase dari total budget.
  */
 export function AllocationForm({
-  uid,
+  weddingId,
   totalBudget,
   categoryName,
   current,
   onClose,
 }: {
-  uid: string;
+  weddingId: string;
   totalBudget: number;
   categoryName: string;
   current: number;
@@ -80,7 +80,7 @@ export function AllocationForm({
 
     setSaving(true);
     try {
-      await setCategoryAllocation(uid, categoryName, amount);
+      await setCategoryAllocation(weddingId, categoryName, amount);
       onClose();
     } catch {
       setError("Gagal menyimpan. Periksa koneksi internet Anda.");

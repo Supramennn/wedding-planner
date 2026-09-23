@@ -17,6 +17,13 @@
  *  3. User B membaca profil/checklist milik A → DENY.
  *  4. User B menulis/menghapus data milik A → DENY.
  *  5. User B upload struk ke folder A → DENY; ke folder sendiri → OK.
+ *  6. KOLABORASI (Fase 2): A membuat weddings/{A} (members [A,B]) → B member
+ *     boleh baca/tulis; user C (non-member) DENY (Firestore & Storage);
+ *     create wedding dengan id bukan milik sendiri DENY.
+ *  7. Invite: member boleh buat weddingInvites; non-member DENY; update
+ *     weddings/{id} TIDAK boleh mengubah members.
+ *  8. Storage legacy: partner B boleh baca users/{A}/receipts (member
+ *     weddings/{A}) tapi tidak boleh TULIS ke folder legacy A.
  *
  * Keluaran: PASS/FAIL per skenario; exit code 1 bila ada kegagalan.
  */
@@ -39,6 +46,7 @@ import {
 import {
   connectStorageEmulator,
   deleteObject,
+  getDownloadURL,
   getStorage,
   ref,
   uploadBytes,
@@ -199,19 +207,161 @@ await expectDenied(
   uploadBytes(ref(storage, otherPath), bytes, { contentType: "image/jpeg" })
 );
 
+// --- 6-8. Kolaborasi (Fase 2): weddings/{id} + member vs non-member -------
+
+// Aktifkan A kembali untuk membuat data pernikahan bersama.
+await signOut(auth);
+await signInWithEmailAndPassword(auth, emailA, "Test-Rules-123");
+
+await expectAllowed(
+  "A membuat weddings/{uidA} (members [A,B])",
+  setDoc(doc(db, "weddings", uidA), {
+    weddingDate: "2030-06-15",
+    venue: "Gedung Uji",
+    fullName_couple: ["A", "B"], // field non-kritis, dipakai verifikasi copy
+    members: [uidA, uidB],
+    coupleNames: { [uidA]: "Rules A", [uidB]: "Rules B" },
+    createdBy: uidA,
+    createdAt: stamp,
+    inviteCode: "ABC123",
+    totalBudget: 100_000_000,
+  })
+);
+await expectDenied(
+  "A membuat weddings/{idBukanMilik} (id != uid) → DENY",
+  setDoc(doc(db, "weddings", "outsider-123"), {
+    members: [uidA],
+    createdBy: uidA,
+  })
+);
+await expectAllowed(
+  "A membuat weddingInvites untuk wedding miliknya",
+  setDoc(doc(db, "weddingInvites", "ABC123"), {
+    weddingId: uidA,
+    createdAt: stamp,
+  })
+);
+await expectDenied(
+  "A membuat weddingInvites untuk wedding yang tidak ada → DENY",
+  setDoc(doc(db, "weddingInvites", "XXX999"), {
+    weddingId: "tidak-ada",
+    createdAt: stamp,
+  })
+);
+
+// Ganti ke B (member) — seharusnya boleh akses data wedding bersama.
+await signOut(auth);
+await signInWithEmailAndPassword(auth, emailB, "Test-Rules-123");
+
+await expectAllowed(
+  "B (member) membaca weddings/{uidA}",
+  getDoc(doc(db, "weddings", uidA))
+);
+await expectAllowed(
+  "B (member) menulis subcollection wedding milik bersama",
+  setDoc(doc(db, "weddings", uidA, "checklist", "item-uji"), {
+    title: "Item B",
+    category: "Umum",
+    dueDate: "",
+    isCompleted: false,
+    createdAt: stamp,
+  })
+);
+await expectAllowed(
+  "B (member) update totalBudget wedding (members tetap)",
+  setDoc(doc(db, "weddings", uidA), { totalBudget: 250_000_000 })
+);
+await expectDenied(
+  "B (member) TIDAK boleh mengubah members wedding saat update",
+  setDoc(doc(db, "weddings", uidA), {
+    members: [uidA, uidB, "uid-penyusup"],
+  })
+);
+await expectAllowed(
+  "B upload struk ke weddings/{uidA}/receipts (member)",
+  uploadBytes(
+    ref(storage, `weddings/${uidA}/receipts/rules-test.jpg`),
+    bytes,
+    { contentType: "image/jpeg" }
+  )
+);
+
+// Struk legacy milik A: B boleh BACA (partner), tidak boleh menulis ke sana.
+const legacyReadPath = `users/${uidA}/receipts/legacy.jpg`;
+await expectAllowed(
+  "A membuat struk legacy di users/{uidA}/receipts (owner)",
+  uploadBytes(ref(storage, legacyReadPath), bytes, {
+    contentType: "image/jpeg",
+  })
+);
+await expectAllowed(
+  "B (partner member) membaca struk legacy milik A",
+  getDownloadURL(ref(storage, legacyReadPath))
+);
+await expectDenied(
+  "B (partner) TIDAK boleh menulis ke folder legacy milik A",
+  uploadBytes(ref(storage, `users/${uidA}/receipts/write.jpg`), bytes, {
+    contentType: "image/jpeg",
+  })
+);
+
+// User C — non-member: semua akses ke wedding bersama harus DENY.
+await signOut(auth);
+const emailC = `rules-test-c+${stamp}@example.com`;
+await createUserWithEmailAndPassword(auth, emailC, "Test-Rules-123");
+
+await expectDenied(
+  "C (non-member) membaca weddings/{uidA}",
+  getDoc(doc(db, "weddings", uidA))
+);
+await expectDenied(
+  "C (non-member) menulis vendor wedding milik bersama",
+  setDoc(doc(db, "weddings", uidA, "vendors", "v-uji"), {
+    name: "Vendor C",
+    status: "dihubungi",
+  })
+);
+await expectDenied(
+  "C (non-member) membuat weddingInvites milik wedding A",
+  setDoc(doc(db, "weddingInvites", "ZZZ999"), {
+    weddingId: uidA,
+    createdAt: stamp,
+  })
+);
+await expectDenied(
+  "C upload struk ke weddings/{uidA}/receipts (non-member)",
+  uploadBytes(
+    ref(storage, `weddings/${uidA}/receipts/dll.jpg`),
+    bytes,
+    { contentType: "image/jpeg" }
+  )
+);
+await expectDenied(
+  "C (non-member) membaca struktur legacy users/{uidA}/receipts",
+  getDownloadURL(ref(storage, legacyReadPath))
+);
+
 // --- Cleanup (best-effort) ---------------------------------------------
 // Hapus data uji sebagai A (owner) — saat ini user aktif masih B,
 // sehingga menghapus data A akan ditolak rules (justru bukti isolasi).
 try {
   await signInWithEmailAndPassword(auth, emailA, "Test-Rules-123");
   await deleteDoc(doc(db, "users", uidA));
+  await deleteDoc(doc(db, "weddings", uidA, "checklist", "item-uji"));
+  await deleteDoc(doc(db, "weddings", uidA));
 } catch {
   /* dokumen mungkin sudah tidak ada / gagal signIn uji */
 }
-try {
-  await deleteObject(ref(storage, ownPath));
-} catch {
-  /* file mungkin gagal terbuat */
+for (const path of [
+  ownPath,
+  legacyReadPath,
+  `weddings/${uidA}/receipts/rules-test.jpg`,
+]) {
+  try {
+    await deleteObject(ref(storage, path));
+  } catch {
+    /* file mungkin tidak tercipta */
+  }
 }
 await signOut(auth);
 

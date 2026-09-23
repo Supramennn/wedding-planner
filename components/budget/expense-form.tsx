@@ -20,7 +20,7 @@ import { Select } from "@/components/ui/select";
  * deskripsi, nominal, tanggal, kategori, foto struk (opsional → Storage).
  */
 export function ExpenseForm({
-  uid,
+  weddingId,
   mode,
   expense,
   initialCategoryName,
@@ -28,12 +28,11 @@ export function ExpenseForm({
   index,
   onClose,
 }: {
-  uid: string;
+  weddingId: string;
   mode: "add" | "edit";
   expense: Expense | null;
   initialCategoryName: string;
-  /** true saat edit — kategori tidak berubah (hindari salah pindah array). */
-  categoryLocked: boolean;
+  categoryLocked?: boolean;
   index?: number;
   onClose: () => void;
 }) {
@@ -74,7 +73,7 @@ export function ExpenseForm({
       let receiptUrl = expense?.receiptUrl ?? "";
       if (receiptFile) {
         setUploading(true);
-        receiptUrl = await uploadReceipt(uid, receiptFile);
+        receiptUrl = await uploadReceipt(weddingId, receiptFile);
         setUploading(false);
       }
 
@@ -86,9 +85,9 @@ export function ExpenseForm({
       };
 
       if (mode === "add") {
-        await addExpense(uid, category, data);
+        await addExpense(weddingId, category, data);
       } else {
-        await updateExpense(uid, initialCategoryName, index ?? -1, data);
+        await updateExpense(weddingId, initialCategoryName, index ?? -1, data);
       }
       onClose();
     } catch (error) {

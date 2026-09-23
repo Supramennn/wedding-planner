@@ -59,9 +59,9 @@ function groupByCategory(items: ChecklistItem[]) {
 
 /** Modul Checklist Persiapan (FR-08 s/d FR-11). */
 export function ChecklistView() {
-  const { user } = useAuth();
+  const { wedding, weddingLoading } = useAuth();
   const { items, loading, error } = useCollection<ChecklistItem>(
-    user ? checklistPath(user.uid) : null,
+    wedding ? checklistPath(wedding.id) : null,
     { orderBy: { field: "createdAt" } }
   );
 
@@ -87,7 +87,7 @@ export function ChecklistView() {
     }
   }
 
-  if (loading) {
+  if (loading || weddingLoading) {
     return (
       <div className="space-y-4">
         <CardSkeleton lines={2} />
@@ -187,9 +187,9 @@ export function ChecklistView() {
                         checked={item.isCompleted}
                         disabled={busyId === item.id}
                         onChange={() =>
-                          user &&
+                          wedding &&
                           runAction(item.id, () =>
-                            toggleChecklistItem(user.uid, item)
+                            toggleChecklistItem(wedding.id, item)
                           )
                         }
                         aria-label={`Tandai selesai: ${item.title}`}
@@ -258,10 +258,10 @@ export function ChecklistView() {
         onClose={() => setFormTarget(null)}
         title={formTarget?.mode === "edit" ? "Ubah tugas" : "Tambah tugas"}
       >
-        {formTarget && user && (
+        {formTarget && wedding && (
           <ChecklistForm
             key={formTarget.item?.id ?? "new"}
-            uid={user.uid}
+            weddingId={wedding.id}
             mode={formTarget.mode}
             item={formTarget.item}
             onClose={() => setFormTarget(null)}
@@ -291,10 +291,10 @@ export function ChecklistView() {
             size="lg"
             loading={busyId === pendingDelete?.id}
             onClick={() =>
-              user &&
+              wedding &&
               pendingDelete &&
               runAction(pendingDelete.id, async () => {
-                await deleteChecklistItem(user.uid, pendingDelete.id);
+                await deleteChecklistItem(wedding.id, pendingDelete.id);
                 setPendingDelete(null);
               })
             }

@@ -11,6 +11,7 @@ import type { ChecklistCategory, ChecklistItem } from "@/types";
 
 /**
  * Tulis-baca modul checklist (FR-09, FR-11).
+ * Skema Fase 2: weddings/{weddingId}/checklist — diakses bersama 2 akun.
  * Semua perubahan langsung ke Firestore — UI tersinkron realtime lewat
  * onSnapshot (tanpa tombol "save" terpisah).
  */
@@ -23,10 +24,10 @@ export interface ChecklistInput {
 }
 
 export async function addChecklistItem(
-  uid: string,
+  weddingId: string,
   input: ChecklistInput
 ): Promise<void> {
-  await addDoc(collection(getDb(), checklistPath(uid)), {
+  await addDoc(collection(getDb(), checklistPath(weddingId)), {
     title: input.title,
     category: input.category,
     dueDate: input.dueDate,
@@ -36,28 +37,28 @@ export async function addChecklistItem(
 }
 
 export async function updateChecklistItem(
-  uid: string,
+  weddingId: string,
   itemId: string,
   input: Partial<ChecklistInput> & { isCompleted?: boolean }
 ): Promise<void> {
   await updateDoc(
-    doc(getDb(), checklistPath(uid), itemId),
+    doc(getDb(), checklistPath(weddingId), itemId),
     input as Record<string, unknown>
   );
 }
 
 export async function toggleChecklistItem(
-  uid: string,
+  weddingId: string,
   item: ChecklistItem
 ): Promise<void> {
-  await updateDoc(doc(getDb(), checklistPath(uid), item.id), {
+  await updateDoc(doc(getDb(), checklistPath(weddingId), item.id), {
     isCompleted: !item.isCompleted,
   });
 }
 
 export async function deleteChecklistItem(
-  uid: string,
+  weddingId: string,
   itemId: string
 ): Promise<void> {
-  await deleteDoc(doc(getDb(), checklistPath(uid), itemId));
+  await deleteDoc(doc(getDb(), checklistPath(weddingId), itemId));
 }

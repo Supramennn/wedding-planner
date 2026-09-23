@@ -12,9 +12,9 @@ import { CardSkeleton } from "@/components/ui/skeleton";
 
 /** FR-05: % checklist selesai keseluruhan. */
 export function ChecklistProgressCard() {
-  const { user } = useAuth();
+  const { wedding } = useAuth();
   const { items, loading, error } = useCollection<ChecklistItem>(
-    user ? checklistPath(user.uid) : null,
+    wedding ? checklistPath(wedding.id) : null,
     { orderBy: { field: "createdAt" } }
   );
 

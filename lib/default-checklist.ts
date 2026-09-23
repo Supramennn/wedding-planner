@@ -7,6 +7,7 @@ import {
   writeBatch,
 } from "firebase/firestore";
 import { getDb } from "@/lib/firebase";
+import { checklistPath } from "@/lib/collection-paths";
 import type { ChecklistCategory } from "@/types";
 
 /**
@@ -66,15 +67,16 @@ function dueDateBefore(weddingDate: string, days: number): string {
 /**
  * Generate checklist default. Aman dipanggil berulang: bila koleksi sudah
  * berisi item, tidak ada apa-apa yang dilakukan (tidak ada duplikasi).
+ * Skema Fase 2: weddings/{weddingId}/checklist.
  *
  * @returns jumlah item yang dibuat (0 bila sudah pernah generate).
  */
 export async function generateDefaultChecklist(
-  uid: string,
+  weddingId: string,
   weddingDate: string
 ): Promise<number> {
   const db = getDb();
-  const checklistCollection = collection(db, "users", uid, "checklist");
+  const checklistCollection = collection(db, checklistPath(weddingId));
 
   const existing = await getDocs(query(checklistCollection, limit(1)));
   if (!existing.empty) return 0;

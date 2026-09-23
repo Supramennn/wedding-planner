@@ -23,9 +23,9 @@ const ACTION_ERROR =
 
 /** Modul Timeline Vendor (FR-17 s/d FR-19). */
 export function VendorView() {
-  const { user } = useAuth();
+  const { wedding, weddingLoading } = useAuth();
   const { items: vendors, loading, error } = useCollection<Vendor>(
-    user ? vendorsPath(user.uid) : null,
+    wedding ? vendorsPath(wedding.id) : null,
     { orderBy: { field: "createdAt" } }
   );
 
@@ -72,7 +72,7 @@ export function VendorView() {
     }
   }
 
-  if (loading) {
+  if (loading || weddingLoading) {
     return (
       <div className="space-y-4">
         <CardSkeleton lines={2} />
@@ -106,7 +106,7 @@ export function VendorView() {
         <Button
           size="md"
           onClick={() => setFormTarget({ mode: "add" })}
-          disabled={!user}
+          disabled={!wedding}
         >
           + Tambah vendor
         </Button>
@@ -189,10 +189,10 @@ export function VendorView() {
         onClose={() => setFormTarget(null)}
         title={formTarget?.mode === "edit" ? "Ubah vendor" : "Tambah vendor"}
       >
-        {formTarget && user && (
+{formTarget && wedding && (
           <VendorForm
             key={formTarget.mode === "edit" ? formTarget.vendor.id : "new"}
-            uid={user.uid}
+            weddingId={wedding.id}
             mode={formTarget.mode}
             vendor={formTarget.mode === "edit" ? formTarget.vendor : null}
             onClose={() => setFormTarget(null)}
@@ -226,10 +226,10 @@ export function VendorView() {
             size="lg"
             loading={busyId === pendingDelete?.id}
             onClick={() =>
-              user &&
+              wedding &&
               pendingDelete &&
               runAction(pendingDelete.id, async () => {
-                await deleteVendor(user.uid, pendingDelete.id);
+                await deleteVendor(wedding.id, pendingDelete.id);
                 setPendingDelete(null);
               })
             }

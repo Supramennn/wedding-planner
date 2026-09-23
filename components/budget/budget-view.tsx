@@ -46,12 +46,12 @@ const LEVEL_BADGE_LABEL = {
 
 /** Modul Budget Tracker (FR-12 s/d FR-16). */
 export function BudgetView() {
-  const { user, profile, loading: authLoading, profileLoading } = useAuth();
+  const { wedding, weddingLoading } = useAuth();
   const {
     items: categories,
     loading: budgetLoading,
     error,
-  } = useCollection<BudgetCategory>(user ? budgetPath(user.uid) : null);
+  } = useCollection<BudgetCategory>(wedding ? budgetPath(wedding.id) : null);
 
   const [totalOpen, setTotalOpen] = useState(false);
   const [allocationTarget, setAllocationTarget] =
@@ -63,7 +63,7 @@ export function BudgetView() {
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
-  const totalBudget = profile?.totalBudget ?? 0;
+  const totalBudget = wedding?.totalBudget ?? 0;
   const stats = useMemo(() => budgetStats(categories), [categories]);
 
   /** Baris alokasi: 9 kategori default + kategori lain yang sudah ada datanya. */
@@ -120,7 +120,7 @@ export function BudgetView() {
     }
   }
 
-  if (authLoading || profileLoading || budgetLoading) {
+  if (weddingLoading || budgetLoading) {
     return (
       <div className="space-y-4">
         <CardSkeleton lines={3} />
@@ -156,7 +156,7 @@ export function BudgetView() {
         <Button
           size="md"
           onClick={() => setExpenseTarget({ mode: "add" })}
-          disabled={!user}
+          disabled={!wedding}
         >
           + Catat pengeluaran
         </Button>
@@ -186,7 +186,7 @@ export function BudgetView() {
             variant="outline"
             size="sm"
             onClick={() => setTotalOpen(true)}
-            disabled={!user}
+            disabled={!wedding}
           >
             {totalBudget > 0 ? "Ubah total" : "Atur total"}
           </Button>
@@ -319,7 +319,7 @@ export function BudgetView() {
                 <Button
                   variant="outline"
                   size="sm"
-                  disabled={!user}
+                  disabled={!wedding}
                   onClick={() =>
                     setAllocationTarget({
                       categoryName: row.name,
@@ -361,7 +361,7 @@ export function BudgetView() {
               action={
                 <Button
                   onClick={() => setExpenseTarget({ mode: "add" })}
-                  disabled={!user}
+                  disabled={!wedding}
                 >
                   Catat pengeluaran
                 </Button>
@@ -440,10 +440,10 @@ export function BudgetView() {
         onClose={() => setTotalOpen(false)}
         title="Total budget pernikahan"
       >
-        {totalOpen && user && (
+        {totalOpen && wedding && (
           <TotalBudgetForm
             key={totalBudget}
-            uid={user.uid}
+            weddingId={wedding.id}
             current={totalBudget}
             onClose={() => setTotalOpen(false)}
           />
@@ -456,10 +456,10 @@ export function BudgetView() {
         onClose={() => setAllocationTarget(null)}
         title="Atur alokasi kategori"
       >
-        {allocationTarget && user && (
+        {allocationTarget && wedding && (
           <AllocationForm
             key={allocationTarget.categoryName}
-            uid={user.uid}
+            weddingId={wedding.id}
             totalBudget={totalBudget}
             categoryName={allocationTarget.categoryName}
             current={allocationTarget.current}
@@ -478,14 +478,14 @@ export function BudgetView() {
             : "Catat pengeluaran"
         }
       >
-        {expenseTarget && user && (
+        {expenseTarget && wedding && (
           <ExpenseForm
             key={
               expenseTarget.mode === "edit"
                 ? `edit-${expenseTarget.categoryName}-${expenseTarget.index}`
                 : "add"
             }
-            uid={user.uid}
+            weddingId={wedding.id}
             mode={expenseTarget.mode}
             expense={expenseTarget.mode === "edit" ? expenseTarget.expense : null}
             initialCategoryName={
@@ -525,13 +525,13 @@ export function BudgetView() {
             size="lg"
             loading={busyKey === (deleteTarget ? `${deleteTarget.categoryName}-${deleteTarget.index}` : null)}
             onClick={() =>
-              user &&
+              wedding &&
               deleteTarget &&
               runAction(
                 `${deleteTarget.categoryName}-${deleteTarget.index}`,
                 async () => {
                   await deleteExpense(
-                    user.uid,
+                    wedding.id,
                     deleteTarget.categoryName,
                     deleteTarget.index
                   );

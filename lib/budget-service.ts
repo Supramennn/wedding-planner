@@ -15,12 +15,14 @@ import {
   getFirebaseStorage,
   isFirebaseConfigured,
 } from "@/lib/firebase";
-import { budgetPath, userDocPath } from "@/lib/collection-paths";
+import { budgetPath, receiptsStoragePath, weddingDocPath } from "@/lib/collection-paths";
 import type { Expense } from "@/types";
 
 /**
  * Service modul Budget (FR-12 s/d FR-16).
- * Skema: users/{uid}/budget/{categoryId} = { categoryName, allocatedAmount, expenses[] }
+ * Skema Fase 2: weddings/{weddingId}/budget/{categoryId} =
+ * { categoryName, allocatedAmount, expenses[] }.
+ * `totalBudget` tersimpan di weddings/{weddingId} (doc utama pernikahan).
  * ID kategori = slug determinik agar upsert tidak pernah menggandakan dokumen.
  */
 
@@ -35,13 +37,13 @@ export function categorySlug(categoryName: string): string {
     .replace(/\s+/g, "-");
 }
 
-/** FR-12: set/edit total budget pernikahan (tersimpan di users/{uid}). */
+/** FR-12: set/edit total budget pernikahan (tersimpan di weddings/{id}). */
 export async function setTotalBudget(
-  uid: string,
+  weddingId: string,
   totalBudget: number
 ): Promise<void> {
   await setDoc(
-    doc(getDb(), userDocPath(uid)),
+    doc(getDb(), weddingDocPath(weddingId)),
     { totalBudget },
     { merge: true }
   );
@@ -49,11 +51,11 @@ export async function setTotalBudget(
 
 /** FR-13: alokasi nominal per kategori (upsert by slug). */
 export async function setCategoryAllocation(
-  uid: string,
+  weddingId: string,
   categoryName: string,
   allocatedAmount: number
 ): Promise<void> {
-  const refDoc = doc(getDb(), budgetPath(uid), categorySlug(categoryName));
+  const refDoc = doc(getDb(), budgetPath(weddingId), categorySlug(categoryName));
   // merge:true → field expenses yang sudah ada tidak tertimpa.
   await setDoc(
     refDoc,
@@ -63,11 +65,11 @@ export async function setCategoryAllocation(
 }
 
 async function readBudgetDoc(
-  uid: string,
+  weddingId: string,
   slug: string,
   fallbackCategoryName: string
 ): Promise<{ refDoc: ReturnType<typeof doc>; data: DocumentData }> {
-  const refDoc = doc(getDb(), budgetPath(uid), slug);
+  const refDoc = doc(getDb(), budgetPath(weddingId), slug);
   const snapshot = await getDoc(refDoc);
   const data = snapshot.exists()
     ? snapshot.data()
@@ -82,12 +84,12 @@ function readExpenses(data: DocumentData): Expense[] {
 
 /** FR-14: tambah pengeluaran ke kategori terpilih. */
 export async function addExpense(
-  uid: string,
+  weddingId: string,
   categoryName: string,
   expense: Expense
 ): Promise<void> {
   const slug = categorySlug(categoryName);
-  const { refDoc, data } = await readBudgetDoc(uid, slug, categoryName);
+  const { refDoc, data } = await readBudgetDoc(weddingId, slug, categoryName);
   await setDoc(refDoc, {
     ...data,
     expenses: [...readExpenses(data), expense],
@@ -96,13 +98,13 @@ export async function addExpense(
 
 /** Edit pengeluaran (index di dalam array expenses dokumen kategori). */
 export async function updateExpense(
-  uid: string,
+  weddingId: string,
   categoryName: string,
   index: number,
   expense: Expense
 ): Promise<void> {
   const slug = categorySlug(categoryName);
-  const { refDoc, data } = await readBudgetDoc(uid, slug, categoryName);
+  const { refDoc, data } = await readBudgetDoc(weddingId, slug, categoryName);
   const expenses = readExpenses(data);
   if (index < 0 || index >= expenses.length) return;
   expenses[index] = expense;
@@ -111,12 +113,12 @@ export async function updateExpense(
 
 /** Hapus pengeluaran (termasuk struk di Storage, best-effort). */
 export async function deleteExpense(
-  uid: string,
+  weddingId: string,
   categoryName: string,
   index: number
 ): Promise<void> {
   const slug = categorySlug(categoryName);
-  const { refDoc, data } = await readBudgetDoc(uid, slug, categoryName);
+  const { refDoc, data } = await readBudgetDoc(weddingId, slug, categoryName);
   const expenses = readExpenses(data);
   if (index < 0 || index >= expenses.length) return;
   const [removed] = expenses.splice(index, 1);
@@ -133,7 +135,10 @@ export async function deleteExpense(
 }
 
 /** Upload struk ke Firebase Storage → URL publik (opsional, FR-14). */
-export async function uploadReceipt(uid: string, file: File): Promise<string> {
+export async function uploadReceipt(
+  weddingId: string,
+  file: File
+): Promise<string> {
   if (!isFirebaseConfigured) {
     throw new Error("Firebase belum dikonfigurasi.");
   }
@@ -144,7 +149,7 @@ export async function uploadReceipt(uid: string, file: File): Promise<string> {
   const safeName = file.name.replace(/[^\w.-]+/g, "_");
   const objectRef = ref(
     getFirebaseStorage(),
-    `users/${uid}/receipts/${Date.now()}-${safeName}`
+    `${receiptsStoragePath(weddingId)}/${Date.now()}-${safeName}`
   );
   const snapshot = await uploadBytes(objectRef, file, {
     contentType: file.type,

@@ -17,9 +17,9 @@ import { CardSkeleton } from "@/components/ui/skeleton";
 
 /** FR-07: jumlah vendor per status (dihubungi/nego/deal/dp/lunas). */
 export function VendorStatusCard() {
-  const { user } = useAuth();
+  const { wedding } = useAuth();
   const { items, loading, error } = useCollection<Vendor>(
-    user ? vendorsPath(user.uid) : null,
+    wedding ? vendorsPath(wedding.id) : null,
     { orderBy: { field: "createdAt" } }
   );
 

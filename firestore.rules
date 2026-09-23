@@ -1,8 +1,21 @@
 rules_version = '2';
 
-// WedPlan — Firestore Security Rules
-// Prinsip: user hanya boleh read/write data di bawah users/{ownUserId}.
-// Tidak ada rule allow lain => path lain otomatis DENY (default deny).
+// WedPlan — Firestore Security Rules (Fase 2: kolaborasi 2 akun pernikahan)
+//
+// Skema:
+//   weddings/{weddingId}              ← data pernikahan BERSAMA
+//   weddings/{weddingId}/{checklist|budget|vendors}   ← dibaca/ditulis 2 member
+//   weddingInvites/{code}             ← lookup join (create oleh member)
+//   users/{userId}                    ← identitas akun (owner only)
+//   users/{userId}/devices/{tokenId}  ← token FCM (owner only)
+//
+// Aturan inti:
+// - weddings: read/update hanya utk member (cek get().data.members); create
+//   utk akun pengguna itu sendiri (id deterministik = uid saat migrasi);
+//   delete hanya oleh createdBy. Update TIDAK boleh mengubah members.
+// - Join anggota via Callable Function (admin SDK bypass rules) — klien
+//   tidak boleh menambah dirinya ke members milik orang lain.
+// - Subcollection di bawah users/{uid} tetap owner-only (jalur migrasi lama).
 service cloud.firestore {
   match /databases/{database}/documents {
 
@@ -14,24 +27,61 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid == userId;
     }
 
-    // Profil pernikahan (sumber tunggal data onboarding)
+    // Anggota data pernikahan weddings/{weddingId}.
+    function isMemberOf(weddingId) {
+      let wedding = get(/databases/$(database)/documents/weddings/$(weddingId)).data;
+      return isSignedIn() && request.auth.uid in wedding.members;
+    }
+
+    // update boleh dilakukan member BIASANYA, asalkan members & createdBy
+    // tidak berubah (array members dipertahankan utuh).
+    function canUpdateWedding(weddingId) {
+      return isMemberOf(weddingId)
+        && request.resource.data.members == resource.data.members
+        && request.resource.data.createdBy == resource.data.createdBy;
+    }
+
+    // --- Identitas akun + perangkat (pribadi, owner only) ---
     match /users/{userId} {
       allow read, write: if isOwner(userId);
 
-      // Checklist persiapan
-      match /checklist/{itemId} {
+      match /devices/{tokenId} {
+        // Token FCM reminder — menulis sendiri, baca sendiri.
         allow read, write: if isOwner(userId);
       }
 
-      // Budget per kategori (expenses adalah array field di dokumen ini)
-      match /budget/{categoryId} {
-        allow read, write: if isOwner(userId);
-      }
+      // Path legacy (users/{uid}/checklist|budget|vendors) tetap owner-only:
+      // dipakai migrasi satu arah & generate checklist default onboarding.
+      // (default deny untuk non-owner.)
+    }
 
-      // Timeline vendor
-      match /vendors/{vendorId} {
-        allow read, write: if isOwner(userId);
+    // --- Data pernikahan bersama + subcollection (member only) ---
+    match /weddings/{weddingId} {
+      // Create: akun membuat data miliknya (id = uid, migrasi/idempotent).
+      // Members wajib berisi dirinya dan ≤ 2.
+      allow create: if isSignedIn()
+        && request.auth.uid == weddingId
+        && request.auth.uid in request.resource.data.members
+        && request.resource.data.members.size() <= 2;
+
+      allow read: if isMemberOf(weddingId);
+      allow update: if canUpdateWedding(weddingId);
+      allow delete: if isSignedIn()
+        && resource.data.createdBy == request.auth.uid;
+
+      match /{subcollection}/{document} {
+        allow read, write: if isMemberOf(weddingId);
       }
+    }
+
+    // --- Kode undangan join (create hanya oleh member wedding tsb) ---
+    match /weddingInvites/{code} {
+      // Kode adalah string acak non-informatif — semua user login boleh baca
+      // untuk verifikasi sebelum memanggil function joinWedding.
+      allow read: if isSignedIn();
+      // Hanya dibuat pemilik wedding yang terekam di kode tsb.
+      allow create: if isSignedIn()
+        && isMemberOf(request.resource.data.weddingId);
     }
   }
 }

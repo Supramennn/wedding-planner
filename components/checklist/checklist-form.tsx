@@ -15,12 +15,12 @@ import { Select } from "@/components/ui/select";
  * Komponen di-mount ulang tiap modal dibuka (key) sehingga state selalu segar.
  */
 export function ChecklistForm({
-  uid,
+  weddingId,
   mode,
   item,
   onClose,
 }: {
-  uid: string;
+  weddingId: string;
   mode: "add" | "edit";
   item: ChecklistItem | null;
   onClose: () => void;
@@ -52,9 +52,9 @@ export function ChecklistForm({
         dueDate,
       };
       if (mode === "add") {
-        await addChecklistItem(uid, input);
+        await addChecklistItem(weddingId, input);
       } else if (item) {
-        await updateChecklistItem(uid, item.id, input);
+        await updateChecklistItem(weddingId, item.id, input);
       }
       onClose();
     } catch {

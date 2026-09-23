@@ -1,28 +1,49 @@
 rules_version = '2';
 
-// WedPlan — Firebase Storage Rules
-// Struk pengeluaran disimpan per user: users/{uid}/receipts/...
-// Prinsip: hanya pemilik yang boleh baca/tulis/hapus; user lain DENY.
+// WedPlan — Firebase Storage Rules (Fase 2: kolaborasi 2 akun)
 //
-// Catatan pemisahan rule:
-// - request.resource.size hanya valid saat WRITE (upload); pada READ/DELETE
-//   request.resource = null → evaluasi propertinya error dan menolak operasi.
-//   Karena itu read/write/delete dipisah menjadi allow terpisah.
+// Jalur baru:  /weddings/{weddingId}/receipts/...   ← upload struk bersama
+// Jalur lama:  /users/{uid}/receipts/...            ← struk sebelum kolaborasi
+//
+// Prinsip:
+// - upload/hapus struk hanya oleh MEMBER data pernikahan (cek Firestore),
+// - baca struk lama (users/{uid}) diizinkan untuk pemilik ATAU member dari
+//   weddings/{uid} — karena id wedding = uid pembuat, URL lama tetap valid
+//   untuk pasangan tanpa memindahkan file.
+// - request.resource.size hanya valid saat WRITE → read/write/delete dipisah.
 service firebase.storage {
   match /b/{bucket}/o {
 
-    function isOwner(userId) {
-      return request.auth != null && request.auth.uid == userId;
+    function isSignedIn() {
+      return request.auth != null;
     }
 
+    // Member dari weddings/{weddingId} (id = dokumen Firestore).
+    function isMemberOf(weddingId) {
+      return request.auth != null
+        && get(/databases/(default)/documents/weddings/$(weddingId)).data.members
+             .hasAny([request.auth.uid]);
+    }
+
+    // --- Struk bersama (parallel dengan Firestore weddings) ---
+    match /weddings/{weddingId}/{allPaths=**} {
+      allow read: if isMemberOf(weddingId);
+      allow write: if isMemberOf(weddingId)
+                    && request.resource.size < 5 * 1024 * 1024;
+      allow delete: if isMemberOf(weddingId);
+    }
+
+    // --- Struk lama (users/{uid}/receipts/...) — owner & partner baca ---
     match /users/{userId}/{allPaths=**} {
-      // Baca struk milik sendiri (mis. tombol "Lihat struk").
-      allow read: if isOwner(userId);
-      // Upload: maksimal 5 MB (sinkron dengan validasi di aplikasi).
-      allow write: if isOwner(userId)
-                   && request.resource.size < 5 * 1024 * 1024;
-      // Hapus file struk (dipanggil saat pengeluaran dihapus).
-      allow delete: if isOwner(userId);
+      // Pemilik boleh semua; partner (member weddings/{userId}) boleh baca
+      // dan hapus. Upload ke jalur lama tidak ditambah lagi (owner only).
+      allow read: if request.auth != null
+        && (request.auth.uid == userId
+            || isMemberOf(userId));
+      allow write: if request.auth.uid == userId
+                    && request.resource.size < 5 * 1024 * 1024;
+      allow delete: if request.auth.uid == userId
+                    || isMemberOf(userId);
     }
   }
 }

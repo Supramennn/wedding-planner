@@ -44,3 +44,7 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Cloud Functions (Fase 2) — build lokal & dependencies tidak ikut repo
+/functions/node_modules
+/functions/lib

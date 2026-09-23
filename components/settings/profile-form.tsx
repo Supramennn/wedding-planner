@@ -3,46 +3,60 @@
 import { useState, type FormEvent } from "react";
 import { useAuth } from "@/lib/hooks/auth-context";
 import { saveUserProfile } from "@/lib/user-service";
+import { saveWedding } from "@/lib/wedding-service";
 import { Button } from "@/components/ui/button";
 import { Card, CardDescription, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { CardSkeleton } from "@/components/ui/skeleton";
-import type { UserProfile } from "@/types";
+import type { UserProfile, Wedding } from "@/types";
 
 /**
  * Form pengaturan profil (FR-03: data onboarding bisa diedit ulang).
- * Field diinisialisasi saat data sudah siap (komponen di-mount setelah
- * snapshot profil tiba — tanpa setState di dalam effect).
+ * Pembagian penyimpanan (Fase 2):
+ * - identitas akun (displayName, partnerName) -> users/{uid},
+ * - data pernikahan (weddingDate, venue) -> weddings/{weddingId}
+ *   (dibaca oleh dashboard/modul dan dibagikan ke pasangan).
  */
 export function ProfileForm() {
-  const { user, profile, loading, profileLoading } = useAuth();
+  const { user, profile, wedding, loading, profileLoading, weddingLoading } =
+    useAuth();
 
-  if (loading || profileLoading || !user) {
+  if (loading || profileLoading || weddingLoading || !user || !wedding) {
     return <CardSkeleton lines={5} />;
   }
 
   return (
-    <ProfileFormInner key={user.uid} uid={user.uid} defaults={profile} />
+    <ProfileFormInner
+      key={wedding.id}
+      uid={user.uid}
+      weddingId={wedding.id}
+      profile={profile}
+      wedding={wedding}
+    />
   );
 }
 
 function ProfileFormInner({
   uid,
-  defaults,
+  weddingId,
+  profile,
+  wedding,
 }: {
   uid: string;
-  defaults: UserProfile | null;
+  weddingId: string;
+  profile: UserProfile | null;
+  wedding: Wedding;
 }) {
   const [displayName, setDisplayName] = useState(
-    () => defaults?.displayName ?? ""
+    () => profile?.displayName ?? ""
   );
   const [partnerName, setPartnerName] = useState(
-    () => defaults?.partnerName ?? ""
+    () => profile?.partnerName ?? ""
   );
   const [weddingDate, setWeddingDate] = useState(
-    () => defaults?.weddingDate ?? ""
+    () => wedding.weddingDate ?? ""
   );
-  const [venue, setVenue] = useState(() => defaults?.venue ?? "");
+  const [venue, setVenue] = useState(() => wedding.venue ?? "");
 
   const [errors, setErrors] = useState<{
     displayName?: string | null;
@@ -74,6 +88,8 @@ function ProfileFormInner({
       await saveUserProfile(uid, {
         displayName: displayName.trim(),
         partnerName: partnerName.trim(),
+      });
+      await saveWedding(weddingId, {
         weddingDate,
         venue: venue.trim(),
       });
@@ -92,7 +108,7 @@ function ProfileFormInner({
       <CardTitle>Data pernikahan</CardTitle>
       <CardDescription>
         Data ini menjadi sumber tunggal untuk dashboard, checklist, dan
-        countdown.
+        countdown — serta dibagikan ke pasanganmu.
       </CardDescription>
 
       {saveError && (

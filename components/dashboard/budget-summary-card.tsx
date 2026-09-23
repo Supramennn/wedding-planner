@@ -14,9 +14,9 @@ import { CardSkeleton } from "@/components/ui/skeleton";
 
 /** FR-06: total budget terpakai vs alokasi (dengan indikator warna, FR-16). */
 export function BudgetSummaryCard() {
-  const { user } = useAuth();
+  const { wedding } = useAuth();
   const { items, loading, error } = useCollection<BudgetCategory>(
-    user ? budgetPath(user.uid) : null
+    wedding ? budgetPath(wedding.id) : null
   );
 
   if (loading) return <CardSkeleton lines={3} />;

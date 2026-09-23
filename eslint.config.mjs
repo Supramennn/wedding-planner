@@ -12,6 +12,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Cloud Functions (Fase 2): konfigurasi & lint terpisah di functions/.
+    "functions/**",
   ]),
 ]);
 

@@ -12,12 +12,12 @@ import { Select } from "@/components/ui/select";
 
 /** Form tambah/ubah vendor (FR-17: semua field wajib tersedia). */
 export function VendorForm({
-  uid,
+  weddingId,
   mode,
   vendor,
   onClose,
 }: {
-  uid: string;
+  weddingId: string;
   mode: "add" | "edit";
   vendor: Vendor | null;
   onClose: () => void;
@@ -65,9 +65,9 @@ export function VendorForm({
     setSaveError(null);
     try {
       if (mode === "add") {
-        await addVendor(uid, input);
+        await addVendor(weddingId, input);
       } else if (vendor) {
-        await updateVendor(uid, vendor.id, input);
+        await updateVendor(weddingId, vendor.id, input);
       }
       onClose();
     } catch {
