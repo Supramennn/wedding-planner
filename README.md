@@ -112,7 +112,7 @@ scripts/
   test-rules-isolation.mjs   # Uji isolasi rules A vs B (lihat bagian 6)
   test-couple-rules.mjs      # Uji rules kolaborasi pasangan (lihat bagian 6)
 public/sw.js                 # Service worker (FR-21) + handler notificationclick (push)
-vercel.json                  # Vercel Cron → /api/cron/reminders (hourly)
+vercel.json                  # Vercel Cron → /api/cron/reminders (harian 02.00 UTC ≈ 09.00 WIB — batas plan Hobby)
 firestore.rules, storage.rules, firebase.json
 ```
 
@@ -196,7 +196,7 @@ Skrip menguji 10+ skenario: A akses data sendiri (wajib lolos), akses tanpa logi
 4. **Deploy** → dapatkan domain (mis. `wedplan.vercel.app` atau domain sendiri).
 5. Firebase Console → Authentication → **Settings → Authorized domains** → tambahkan domain Vercel (wajib untuk login Google).
 6. Deploy rules ke Firebase (bagian [6](#6-keamanan-security-rules--uji-isolasi)) **sebelum** user pertama mendaftar.
-7. **(Opsional — push):** set 3 env push di Vercel (di atas) lalu deploy ulang — `vercel.json` otomatis mendaftarkan cron hourly ke `/api/cron/reminders`. Uji manual: `curl -H "Authorization: Bearer $CRON_SECRET" https://<domain>/api/cron/reminders` (tanpa header → `401`, di luar jendela WIB → `{"skipped":"outside-send-window"}`).
+7. **(Opsional — push):** set 3 env push di Vercel (di atas) lalu deploy ulang — `vercel.json` otomatis mendaftarkan cron **harian 02.00 UTC (≈09.00 WIB)** ke `/api/cron/reminders` (plan Vercel Hobby dibatasi maks 1×/sehari — ekspresi lebih sering **gagal saat deploy**). Uji manual: `curl -H "Authorization: Bearer $CRON_SECRET" https://<domain>/api/cron/reminders` (tanpa header → `401`, di luar jendela WIB → `{"skipped":"outside-send-window"}`).
 8. Uji live: daftar → onboarding → isi 3 modul → install PWA (bagian 10).
 
 ## 8. PWA (Manifest, Service Worker, Offline)
@@ -271,7 +271,7 @@ Sesuai PRD (Out-of-Scope + Roadmap Fase 2). **Kolaborasi 2 akun & push FCM sudah
 **Catatan keputusan implementasi** (kandidat perbaikan, bukan fitur baru):
 
 - **Kolaborasi pasangan (Phase 2)** — undangan via **email** (`partnerEmail` + auto-claim sekali per sesi di `auth-context`) alih-alih kode manual: tanpa langkah salin-tempel, tautan terjadi otomatis saat pasangan login. Data tetap di path PRD `users/{pemilik}` (tanpa migrasi); `workspaceUid = linkedTo ?? uid`. Klaim dibatasi rules `hasOnly(['partnerUid','coupleStatus'])` sehingga penerima undangan tidak bisa mengubah data lain sebelum tautan sah. Kedua akun dianggap **co-owner penuh** (model kepercayaan: pasangan = satu tim).
-- **Push FCM (Phase 2)** — pengiriman **server-side** via `firebase-admin` di route cron Vercel (klien tidak pernah memegang kredensial); dedupe `reminderLog` per item+tanggal agar hourly-cron tidak spam; token disimpan **per akun** (bukan gabungan workspace) agar unlink otomatis memutus kiriman ke mantan pasangan; jendela kirim 07.00–21.00 WIB agar tidak mengganggu malam. Bila plan Vercel membatasi jadwal cron, cukup ubah `schedule` di `vercel.json` (endpoint tetap aman & dedupe).
+- **Push FCM (Phase 2)** — pengiriman **server-side** via `firebase-admin` di route cron Vercel (klien tidak pernah memegang kredensial); dedupe `reminderLog` per item+tanggal; token disimpan **per akun** (bukan gabungan workspace) agar unlink otomatis memutus kiriman ke mantan pasangan; jendela kirim 07.00–21.00 WIB agar tidak mengganggu malam. **Jadwal `0 2 * * *` (≈09.00 WIB) mengikuti batas plan Hobby Vercel (maks 1×/sehari — lebih sering bikin deploy gagal)**; pengingat harian granularity jadi cukup — satu pass mengirim semua H-7/H-3/H-1/H-0 yang jatuh hari itu. Butuh lebih sering → upgrade Pro lalu ubah `schedule` (endpoint & dedupe tetap aman).
 
 - `totalBudget` disimpan di `users/{userId}` — lokasi tidak dispesifikasi PRD untuk FR-12.
 - Service worker **native** (`public/sw.js`) alih-alih `next-pwa` — PRD mengizinkan keduanya; plugin `next-pwa` tidak kompatibel dengan toolchain Next 16.

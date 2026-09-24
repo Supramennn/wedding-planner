@@ -10,7 +10,9 @@ import { getMessaging } from "firebase-admin/messaging";
 /**
  * Cron pengirim push notification reminder (Phase 2 — FCM).
  *
- * Dijadwalkan Vercel (vercel.json → hourly). Alur:
+ * Dijadwalkan Vercel (vercel.json → harian 02.00 UTC ≈ 09.00 WIB — batas
+ * plan Vercel Hobby maks 1×/sehari; ekspresi lebih sering gagal deploy).
+ * Alur:
  * 1. Otorisasi: header `Authorization: Bearer ${CRON_SECRET}` (Vercel cron
  *    mengirimkannya otomatis bila env CRON_SECRET di-set). Tanpa secret → 401.
  * 2. Jendela kirim 07.00–21.00 WIB (di luar jendela → skip, tidak ada
