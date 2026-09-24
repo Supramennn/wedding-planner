@@ -31,10 +31,10 @@ WedPlan membantu calon pengantin mengelola **checklist, budget, dan vendor** per
 | Budget | FR-12…16 | Total budget (edit kapan saja); alokasi per kategori via **nominal atau persentase**; pengeluaran + **foto struk → Firebase Storage**; chart Recharts **alokasi vs realisasi**; warna hijau <70% / kuning 70–99% / merah ≥100% |
 | Vendor | FR-17…19 | Field lengkap + alur status Dihubungi→Nego→Deal→DP→Lunas; **dua mode tampilan**: list (sortable) & timeline (urut deadline); badge **H-7 / H-3 / H-1** + "Terlambat"/"Hari ini" |
 | PWA | FR-20…23 | Manifest lengkap (standalone, ikon 192/512/maskable), service worker + halaman `/offline`, responsive mobile-first |
-| **Kolaborasi pasangan** *(Phase 2)* | — | **2 akun → 1 data pernikahan**: undang via email → tautan otomatis (auto-claim); seluruh modul realtime dua arah; lepas tautan kapan saja |
+| **Kolaborasi pasangan** *(Phase 2)* | — | **2 akun → 1 data pernikahan**: undang via email → tautan otomatis (auto-claim); bila kedua akun sudah punya data → tombol **gabungkan (merge)** dengan dedup; seluruh modul realtime dua arah; lepas tautan kapan saja |
 | **Pengingat push** *(Phase 2)* | — | **FCM**: notifikasi H-7/H-3/H-1/H-0 jatuh tempo pembayaran vendor & tenggat checklist; dikirim cron Vercel (jendela 07.00–21.00 WIB, dedupe harian, token mati di-prune) |
 
-**Di luar cakupan MVP** (dicatat, tidak diimplementasikan): integrasi undangan, marketplace vendor, role wedding organizer, payment gateway, merge dua dataset pasangan yang sudah sama-sama terisi → lihat [Future Enhancement](#11-future-enhancement-di-luar-mvp).
+**Di luar cakupan MVP** (dicatat, tidak diimplementasikan): integrasi undangan, marketplace vendor, role wedding organizer, payment gateway → lihat [Future Enhancement](#11-future-enhancement-di-luar-mvp).
 
 ## 2. Tech Stack
 
@@ -126,6 +126,7 @@ users/{userId}
   - totalBudget*            (*field tambahan FR-12 — lihat catatan di bawah)
   - partnerEmail*, partnerUid*, coupleStatus*, linkedTo*   (kolaborasi Phase 2)
   - fcmTokens*              (*token FCM milik AKUN INI — push Phase 2)
+  - mergedFromUid*, mergedAt* (penanda idempoten merge — Phase 2)
 
 users/{userId}/checklist/{itemId}
   - title, category, dueDate, isCompleted, createdAt
@@ -147,11 +148,12 @@ users/{userId}/reminderLog/{logId}      (tulis HANYA Admin SDK server; client DE
 - Item `expenses` diedit berbasis **index** dalam array (skema persis PRD, tanpa id per-transaksi) — aman untuk single-user.
 - **Storage:** struk di `users/{uid}/receipts/{timestamp}-{nama}`, maks **5 MB** (divalidasi di aplikasi *dan* rules).
 - **Kolaborasi (Phase 2):** data pernikahan tetap di bawah `users/{pemilik}`; pasangan menautkan akunnya lewat `linkedTo` di dokumennya sendiri. `workspaceUid = linkedTo ?? uid sendiri` (lihat `auth-context.tsx`) — semua modul membaca path dari `workspaceUid`, sehingga dua akun realtime pada dataset yang sama. Field couple bersifat **additive** (dokumen lama tanpa field ini tetap sah — rules menanganinya).
+- **Merge dua data (Phase 2):** bila kedua akun sudah onboarding, tautan lewat tombol di kartu Pengaturan — **klaim dulu, baru salin**: profil mengisi kekosongan (workspace menang), checklist/vendor dedup (judul+kategori / nama+kategori), budget per-slug (alokasi workspace dipertahankan, expenses menyatu), struk disalin best-effort ke folder workspace, penanda `mergedFromUid` ditulis **terakhir** (retry aman, tidak menggandakan).
 - **Push (Phase 2):** `fcmTokens` ada di dokumen SETIAP akun; cron mengumpulkan token workspace + `partnerUid` → unlink otomatis memutus kiriman ke mantan pasangan.
 
 ## 6. Keamanan (Security Rules) & Uji Isolasi
 
-**Prinsip: owner-only, default deny.** `firestore.rules` hanya membuka `users/{ownUserId}/**` — path lain otomatis ditolak. Untuk **kolaborasi Phase 2**, pasangan tertaut (`partnerUid == request.auth.uid`, dicek via `get()` ke dokumen induk — path tetap, tervalidasi sekali per list) mendapat akses penuh ke workspace-nya; penerima undangan hanya bisa membaca profil ber-`partnerEmail` sama dengan token emailnya dan mengklaim dua field tautan. `storage.rules` memisahkan `read` / `write` (maks 5 MB) / `delete`, dengan cek pasangan via `firestore.get()` (rules v2 cross-service).
+**Prinsip: owner-only, default deny.** `firestore.rules` hanya membuka `users/{ownUserId}/**` — path lain otomatis ditolak. Untuk **kolaborasi Phase 2**, pasangan tertaut (`partnerUid == request.auth.uid`, dicek via `get()` ke dokumen induk — path tetap, tervalidasi sekali per list) mendapat akses penuh ke workspace-nya; penerima undangan hanya bisa membaca profil ber-`partnerEmail` sama dengan token emailnya dan mengklaim dua field tautan. `storage.rules` memisahkan `read` / `write` (maks 5 MB) / `delete`, dengan cek pasangan **dua arah** via `firestore.get()` (`partnerUid` ATAU `linkedTo`, dijaga `keys().hasAny()` untuk dokumen legacy) — arah `linkedTo` membuat pemilik tetap bisa membuka struk lama pasangan hasil **merge**.
 
 > Rules dipisah per operasi karena `request.resource` bernilai `null` saat READ/DELETE — menggabungkannya dengan `request.resource.size` akan menolak operasi tersebut.
 
@@ -172,7 +174,7 @@ npx firebase-tools emulators:exec --only auth,firestore,storage \
   --project demo-wedplan "node scripts/test-rules-isolation.mjs --emulator && node scripts/test-couple-rules.mjs --emulator"
 ```
 
-Skrip **`test-couple-rules.mjs`** (Phase 2) menambah 29 skenario kolaborasi: temukan undangan via query email sendiri → klaim dua langkah → pasangan membaca/menulis checklist & profil workspace, upload struk ke folder pasangan (semua `PASS`); pihak ketiga C ditolak total termasuk upaya klaim; setelah unlink oleh pemilik, akses pasangan gugur kembali.
+Skrip **`test-couple-rules.mjs`** (Phase 2) menambah **41 skenario** kolaborasi & merge: temukan undangan via query email sendiri → klaim dua langkah → **simulasi merge** (isi kekosongan profil, salin checklist dengan dedup — 2 dari 3 item, gabung budget per-slug, penanda idempoten) → pasangan membaca/menulis checklist, budget & profil workspace, upload struk ke folder pasangan (semua `PASS`); arah storage `linkedTo` (pemilik membaca struk lama pasangan `PASS`, gugur setelah unlink); pihak ketiga C ditolak total termasuk upaya klaim; setelah unlink oleh pemilik, akses pasangan gugur kembali sementara data miliknya sendiri tetap terbaca.
 
 **Jalur B — proyek asli (setelah rules di-deploy):**
 
@@ -240,7 +242,7 @@ Skrip menguji 10+ skenario: A akses data sendiri (wajib lolos), akses tanpa logi
 | Halaman offline terus-muncul padahal online | Buka DevTools → Application → Service Workers → *Unregister*, atau bump `VERSION` |
 | Struk gagal diunggah | Ukuran >5 MB, Storage belum aktif, atau `storage.rules` belum di-deploy |
 | Pengingat push tidak masuk | Env push belum lengkap (VAPID/CRON_SECRET/service account) · belum klik "Aktifkan pengingat" · `permission-denied` di **Vercel → Logs** untuk cron = `CRON_SECRET` beda antara Vercel & kode · `503` = `FIREBASE_SERVICE_ACCOUNT` kosong/tidak valid · di luar jendela 07.00–21.00 WIB memang di-skip |
-| Pasangan tidak bisa akses data | Undangan belum diklaim (pasangan harus daftar/masuk **dengan email yang diundang**) · `firestore.rules`/`storage.rules` terbaru belum di-deploy · kedua akun sudah punya data sendiri → butuh merge (belum tersedia) |
+| Pasangan tidak bisa akses data | Undangan belum diklaim (pasangan harus daftar/masuk **dengan email yang diundang**) · `firestore.rules`/`storage.rules` terbaru belum di-deploy · kedua akun sudah punya data sendiri → pakai tombol **"Gabungkan data & tautkan"** di kartu Kolaborasi pasangan (Pengaturan) |
 
 ## 10. Checklist Verifikasi (Definition of Done)
 
@@ -254,23 +256,22 @@ Skrip menguji 10+ skenario: A akses data sendiri (wajib lolos), akses tanpa logi
   - [ ] Budget: set total → alokasi % dan Rp → catat pengeluaran + struk → chart & warna sesuai ambang; sisa budget benar.
   - [ ] Vendor: 2 mode tampilan; deadline 7/3/1 hari ke depan menampilkan badge H-7/H-3/H-1; status berpindah tahap.
 - [ ] **Rules isolation PASS** (jalur A/B/manual di [bagian 6](#6-keamanan-security-rules--uji-isolasi)).
-- [ ] **Kolaborasi pasangan**: undang dari Pengaturan → pasangan daftar dengan email itu → keduanya masuk dashboard yang sama; edit checklist di A muncul realtime di B; C (akun ketiga) tetap ditolak; unlink memutus akses B.
+- [ ] **Kolaborasi pasangan**: undang dari Pengaturan → pasangan daftar dengan email itu → keduanya masuk dashboard yang sama; edit checklist di A muncul realtime di B; C (akun ketiga) tetap ditolak; unlink memutus akses B; kedua akun sudah terisi data → tombol **"Gabungkan data & tautkan"** menggabung checklist/budget/vendor tanpa duplikat.
 - [ ] **Push reminder**: Pengaturan → "Aktifkan pengingat" (izin diberikan, status Diizinkan) → cron terjadwal; uji `curl` endpoint cron dengan `CRON_SECRET` mengembalikan JSON `ok:true`; notifikasi masuk di HP saat item deadline H-1/H-0; klik notifikasi membuka rute terkait.
 - [ ] **Live** di domain Vercel dengan Firebase aktif (URL dicatat di sini setelah deploy).
 
 ## 11. Future Enhancement (di luar MVP)
 
-Sesuai PRD (Out-of-Scope + Roadmap Fase 2). **Kolaborasi 2 akun & push FCM sudah diimplementasikan (Phase 2)** — sisanya belum dan tidak boleh diimplementasikan di MVP:
+Sesuai PRD (Out-of-Scope + Roadmap Fase 2). **Kolaborasi 2 akun (termasuk merge dua dataset), push FCM, dan reminder H-x sudah diimplementasikan (Phase 2)** — sisanya belum dan tidak boleh diimplementasikan di MVP:
 
-1. **Merge dua dataset pasangan** bila kedua akun sudah sama-sama onboarding (otomatis-claim sengaja hanya untuk akun yang belum punya data — lihat catatan di bawah).
-2. **Integrasi** ke produk wedding invitation Nexus Diji (satu akun untuk keduanya / cross-sell).
-3. **Vendor marketplace / direktori** vendor pihak ketiga.
-4. Mode **wedding organizer** (multi-client, role planner).
-5. **Payment gateway** / transaksi di dalam aplikasi.
+1. **Integrasi** ke produk wedding invitation Nexus Diji (satu akun untuk keduanya / cross-sell).
+2. **Vendor marketplace / direktori** vendor pihak ketiga.
+3. Mode **wedding organizer** (multi-client, role planner).
+4. **Payment gateway** / transaksi di dalam aplikasi.
 
 **Catatan keputusan implementasi** (kandidat perbaikan, bukan fitur baru):
 
-- **Kolaborasi pasangan (Phase 2)** — undangan via **email** (`partnerEmail` + auto-claim sekali per sesi di `auth-context`) alih-alih kode manual: tanpa langkah salin-tempel, tautan terjadi otomatis saat pasangan login. Data tetap di path PRD `users/{pemilik}` (tanpa migrasi); `workspaceUid = linkedTo ?? uid`. Klaim dibatasi rules `hasOnly(['partnerUid','coupleStatus'])` sehingga penerima undangan tidak bisa mengubah data lain sebelum tautan sah. Kedua akun dianggap **co-owner penuh** (model kepercayaan: pasangan = satu tim).
+- **Kolaborasi pasangan (Phase 2)** — undangan via **email** (`partnerEmail` + auto-claim sekali per sesi di `auth-context`) alih-alih kode manual: tanpa langkah salin-tempel, tautan terjadi otomatis saat pasangan login. Data tetap di path PRD `users/{pemilik}` (tanpa migrasi); `workspaceUid = linkedTo ?? uid sendiri`. Klaim dibatasi rules `hasOnly(['partnerUid','coupleStatus'])` sehingga penerima undangan tidak bisa mengubah data lain sebelum tautan sah. Kedua akun dianggap **co-owner penuh** (model kepercayaan: pasangan = satu tim). **Merge** (kasus kedua-duanya sudah terisi): tombol **eksplisit** di Pengaturan — klaim dua langkah dulu, baru penyalinan (`mergeAndClaim`: profil isi-kosong, checklist/vendor dedup, budget per-slug dengan alokasi workspace menang, struk disalin best-effort ke folder workspace); auto-claim **tidak pernah** merge diam-diam; penanda `mergedFromUid` (tulis terakhir) membuat retry idempoten.
 - **Push FCM (Phase 2)** — pengiriman **server-side** via `firebase-admin` di route cron Vercel (klien tidak pernah memegang kredensial); dedupe `reminderLog` per item+tanggal; token disimpan **per akun** (bukan gabungan workspace) agar unlink otomatis memutus kiriman ke mantan pasangan; jendela kirim 07.00–21.00 WIB agar tidak mengganggu malam. **Jadwal `0 2 * * *` (≈09.00 WIB) mengikuti batas plan Hobby Vercel (maks 1×/sehari — lebih sering bikin deploy gagal)**; pengingat harian granularity jadi cukup — satu pass mengirim semua H-7/H-3/H-1/H-0 yang jatuh hari itu. Butuh lebih sering → upgrade Pro lalu ubah `schedule` (endpoint & dedupe tetap aman).
 
 - `totalBudget` disimpan di `users/{userId}` — lokasi tidak dispesifikasi PRD untuk FR-12.

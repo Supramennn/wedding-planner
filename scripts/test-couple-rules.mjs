@@ -12,16 +12,26 @@
  *      akun dapat dihapus via Firebase Console → Authentication.)
  *
  * Skenario yang dibuktikan:
- *  1. A membuat undangan (partnerEmail = email B) → baseline A akses sendiri.
- *  2. B menemukan undangan via query `where partnerEmail == email B` (izin rules).
- *  3. SEBELUM klaim: B DITOLAK mengakses subcollection A (checklist).
- *  4. Klaim: B menulis {partnerUid,coupleStatus} di A & {linkedTo} di doc B → OK.
- *  5. SETELAH klaim: B membaca list checklist A (12 dokumen → uji get() pada
+ *  1. A membuat undangan (partnerEmail = email B) + baseline data A
+ *     (checklist 12 item, budget "katering") → akses sendiri OK.
+ *  2. B SUDAH onboarding solo (punya data: 3 item checklist dengan 1 duplikat
+ *     judul vs A, budget 2 kategori, struk sendiri) — kasus dua-duanya terisi.
+ *     SEBELUM klaim: A DITOLAK mengakses data & struk milik B.
+ *  3. B menemukan undangan via query `where partnerEmail == email B` (izin rules).
+ *  4. SEBELUM klaim: B DITOLAK mengakses subcollection A (checklist).
+ *  5. Klaim: B menulis {partnerUid,coupleStatus} di A & {linkedTo} di doc B → OK.
+ *  6. MERGE (tirada couple-service.mergeAndClaim): B mengisi kekosongan
+ *     profil A, menyalin checklist (dedup judul+kategori → 2 dari 3 item),
+ *     menggabung budget (alokasi tetap punya A, expenses menyatu; kategori
+ *     baru disalin penuh), lalu menulis penanda mergedFromUid → semua OK.
+ *  7. SETELAH klaim: B membaca list checklist A (14 dokumen → uji get() pada
  *     list), menambah/mengubah item, & mengubah profil A → OK (kolaborasi).
- *  6. B upload struk ke folder A (storage via firestore.get) → OK.
- *  7. C (pihak ketiga): baca/tulis profil, subcollection, storage milik A,
+ *  8. B upload struk ke folder A (storage via firestore.get) → OK.
+ *  9. C (pihak ketiga): baca/tulis profil, subcollection, storage milik A,
  *     serta upaya klaim diri → SEMUA DENY.
- *  8. Unlink oleh A: kedua dokumen dibersihkan → akses B gugur → DENY.
+ * 10. A (pemilik) membaca struk LAMA folder B → OK (arah linkedTo); lalu
+ *     unlink oleh A → seluruh akses B gugur (termasuk arah storage
+ *     linkedTo), sementara B tetap bisa baca struk miliknya sendiri.
  *
  * Keluaran: PASS/FAIL per skenario; exit code 1 bila ada kegagalan.
  */
@@ -50,6 +60,7 @@ import {
 import {
   connectStorageEmulator,
   deleteObject,
+  getDownloadURL,
   getStorage,
   ref,
   uploadBytes,
@@ -60,6 +71,7 @@ const useEmulator =
   Boolean(process.env.FIRESTORE_EMULATOR_HOST);
 
 const stamp = Date.now();
+const bytes = new Uint8Array([1, 2, 3, 4]);
 
 const config = useEmulator
   ? {
@@ -187,6 +199,19 @@ await expectAllowed(
   "A membaca checklist miliknya sendiri (12 item)",
   getDocs(collection(db, "users", uidA, "checklist"))
 );
+// Budget awal A — merge nanti menguji jalur "kategori sudah ada di workspace".
+await setDoc(doc(db, "users", uidA, "budget", "katering"), {
+  categoryName: "Katering",
+  allocatedAmount: 10_000_000,
+  expenses: [
+    {
+      description: "DP katering A",
+      amount: 2_000_000,
+      date: "2029-11-01",
+      receiptUrl: "",
+    },
+  ],
+});
 
 await signOut(auth);
 
@@ -206,6 +231,72 @@ await setDoc(doc(db, "users", uidB), {
   linkedTo: null,
   createdAt: stamp,
 });
+
+// B SUDAH onboarding solo (punya data sendiri) → kasus "dua-duanya terisi":
+// auto-claim akan diam; penautan lewat tombol merge di Pengaturan.
+await setDoc(
+  doc(db, "users", uidB),
+  {
+    partnerName: "Pasangan B",
+    weddingDate: "2030-02-02",
+    venue: "Venue B",
+    totalBudget: 150_000_000,
+  },
+  { merge: true }
+);
+// "Tugas 1" sengaja duplikat judul dengan A → uji dedup saat merge.
+const ownTitles = ["Tugas 1", "Persiapan B", "Hal B"];
+for (const [index, title] of ownTitles.entries()) {
+  await setDoc(doc(collection(db, "users", uidB, "checklist")), {
+    title,
+    category: "Lain-lain",
+    dueDate: "",
+    isCompleted: index === 1,
+    createdAt: stamp + 200 + index,
+  });
+}
+await setDoc(doc(db, "users", uidB, "budget", "katering"), {
+  categoryName: "Katering",
+  allocatedAmount: 50_000_000,
+  expenses: [
+    {
+      description: "DP katering B",
+      amount: 5_000_000,
+      date: "2029-12-01",
+      receiptUrl: "",
+    },
+  ],
+});
+await setDoc(doc(db, "users", uidB, "budget", "dekorasi"), {
+  categoryName: "Dekorasi",
+  allocatedAmount: 20_000_000,
+  expenses: [
+    {
+      description: "Bunga meja",
+      amount: 1_500_000,
+      date: "2029-12-02",
+      receiptUrl: "",
+    },
+  ],
+});
+const legacyReceiptB = `users/${uidB}/receipts/couple-test-b-legacy.jpg`;
+await expectAllowed(
+  "B upload struk lama ke folder sendiri (baseline)",
+  uploadBytes(ref(storage, legacyReceiptB), bytes, { contentType: "image/jpeg" })
+);
+
+// SEBELUM klaim: pemilik undangan (A) juga belum boleh menyentuh data B.
+await signOut(auth);
+await signInWithEmailAndPassword(auth, emailA, PASSWORD);
+await expectDenied(
+  "A membaca checklist B sebelum klaim",
+  getDocs(collection(db, "users", uidB, "checklist"))
+);
+await expectDenied(
+  "A membaca struk lama milik B sebelum klaim",
+  getDownloadURL(ref(storage, legacyReceiptB))
+);
+await signOut(auth);
 
 const credC = await createUserWithEmailAndPassword(auth, emailC, PASSWORD);
 const uidC = credC.user.uid;
@@ -271,11 +362,118 @@ await expectAllowed(
   )
 );
 
-// --- 5. SETELAH klaim: kolaborasi penuh dua arah --------------------------
+// --- 6. MERGE: B menyalin datanya ke workspace A (pasca-klaim) -----------
+// Tirada couple-service.mergeAndClaim — semua langkah memakai HAK yang sama
+// dengan rules: owner di dokumen sendiri, partner via get() pada induk.
+await expectAllowed(
+  "Merge: B mengisi totalBudget A yang kosong dari data sendiri",
+  setDoc(doc(db, "users", uidA), { totalBudget: 150_000_000 }, { merge: true })
+);
 await expectValue(
-  "B membaca list checklist A (12 item — get() pada list rules)",
+  "Merge: venue A TIDAK tertimpa (sudah terisi → workspace menang)",
+  getDoc(doc(db, "users", uidA)),
+  (snapshot) => snapshot.exists() && snapshot.data().venue === "Venue Uji"
+);
+
+// Checklist: dedup judul+kategori — 2 unik tersalin, "Tugas 1" dilewati.
+{
+  const [ownSnap, ownerSnap] = await Promise.all([
+    getDocs(collection(db, "users", uidB, "checklist")),
+    getDocs(collection(db, "users", uidA, "checklist")),
+  ]);
+  const have = new Set(
+    ownerSnap.docs.map(
+      (entry) =>
+        `${String(entry.data().title).trim().toLowerCase()}|${entry.data().category}`
+    )
+  );
+  let copied = 0;
+  for (const item of ownSnap.docs) {
+    const data = item.data();
+    const key = `${String(data.title).trim().toLowerCase()}|${data.category}`;
+    if (have.has(key)) continue;
+    have.add(key);
+    await setDoc(doc(collection(db, "users", uidA, "checklist")), data);
+    copied++;
+  }
+  report(
+    copied === 2,
+    "Merge: checklist B — 2 item unik tersalin, duplikat 'Tugas 1' dilewati",
+    `tersalin=${copied}`
+  );
+}
+await expectValue(
+  "Merge: checklist A kini 14 item (12 asli + 2 dari B)",
   getDocs(collection(db, "users", uidA, "checklist")),
-  (snapshot) => snapshot.size === 12
+  (snapshot) => snapshot.size === 14
+);
+
+// Budget: kategori sama → expenses menyatu (alokasi tetap punya A);
+// kategori milik B → disalin penuh.
+{
+  const [ownSnap, ownerSnap] = await Promise.all([
+    getDocs(collection(db, "users", uidB, "budget")),
+    getDocs(collection(db, "users", uidA, "budget")),
+  ]);
+  const ownerBySlug = new Map(ownerSnap.docs.map((entry) => [entry.id, entry]));
+  const keyOf = (expense) =>
+    `${expense.description}|${expense.amount}|${expense.date}`;
+  for (const snap of ownSnap.docs) {
+    const data = snap.data();
+    const ownExpenses = Array.isArray(data.expenses) ? data.expenses : [];
+    const target = ownerBySlug.get(snap.id);
+    if (!target) {
+      await setDoc(doc(db, "users", uidA, "budget", snap.id), data);
+      continue;
+    }
+    const targetData = target.data();
+    const expenses = Array.isArray(targetData.expenses)
+      ? [...targetData.expenses]
+      : [];
+    const have = new Set(expenses.map(keyOf));
+    for (const expense of ownExpenses) {
+      const key = keyOf(expense);
+      if (have.has(key)) continue;
+      have.add(key);
+      expenses.push(expense);
+    }
+    await setDoc(target.ref, {
+      categoryName: targetData.categoryName,
+      allocatedAmount: targetData.allocatedAmount || data.allocatedAmount || 0,
+      expenses,
+    });
+  }
+}
+await expectValue(
+  "Merge: budget 'katering' — alokasi tetap punya A, expenses bergabung (2)",
+  getDoc(doc(db, "users", uidA, "budget", "katering")),
+  (snapshot) =>
+    snapshot.exists() &&
+    snapshot.data().allocatedAmount === 10_000_000 &&
+    snapshot.data().expenses.length === 2
+);
+await expectValue(
+  "Merge: kategori milik B ('dekorasi') disalin penuh ke workspace A",
+  getDoc(doc(db, "users", uidA, "budget", "dekorasi")),
+  (snapshot) =>
+    snapshot.exists() &&
+    snapshot.data().allocatedAmount === 20_000_000 &&
+    snapshot.data().expenses.length === 1
+);
+await expectAllowed(
+  "Merge: B menulis penanda mergedFromUid di dokumen A (idempoten)",
+  setDoc(
+    doc(db, "users", uidA),
+    { mergedFromUid: uidB, mergedAt: stamp },
+    { merge: true }
+  )
+);
+
+// --- 7. SETELAH klaim & merge: kolaborasi penuh dua arah -----------------
+await expectValue(
+  "B membaca list checklist A (14 item — get() pada list rules)",
+  getDocs(collection(db, "users", uidA, "checklist")),
+  (snapshot) => snapshot.size === 14
 );
 
 const bNewItem = doc(collection(db, "users", uidA, "checklist"));
@@ -302,8 +500,7 @@ await expectAllowed(
   setDoc(doc(db, "users", uidA), { totalBudget: 250_000_000 }, { merge: true })
 );
 
-// --- 6. Storage: B upload struk ke folder A -------------------------------
-const bytes = new Uint8Array([1, 2, 3, 4]);
+// --- 8. Storage: B upload struk ke folder A -------------------------------
 const receiptByB = `users/${uidA}/receipts/couple-test-b.jpg`;
 await expectAllowed(
   "B upload struk ke folder A (storage firestore.get)",
@@ -317,7 +514,7 @@ await expectAllowed(
   })()
 );
 
-// --- 7. C (pihak ketiga) tetap terkunci total -----------------------------
+// --- 9. C (pihak ketiga) tetap terkunci total -----------------------------
 await signOut(auth);
 await signInWithEmailAndPassword(auth, emailC, PASSWORD);
 await expectDenied(
@@ -359,9 +556,13 @@ await expectAllowed(
   })
 );
 
-// --- 8. Unlink oleh A → akses B gugur ------------------------------------
+// --- 10. Arah kedua storage + Unlink oleh A → akses B gugur ---------------
 await signOut(auth);
 await signInWithEmailAndPassword(auth, emailA, PASSWORD);
+await expectAllowed(
+  "A (pemilik) membaca struk lama folder B — arah linkedTo pasca-merge",
+  getDownloadURL(ref(storage, legacyReceiptB))
+);
 await expectAllowed(
   "A unlink: bersihkan partnerUid/partnerEmail di dokumennya",
   setDoc(
@@ -405,6 +606,16 @@ await expectDenied(
     contentType: "image/jpeg",
   })
 );
+await expectAllowed(
+  "B (setelah unlink) tetap membaca struk miliknya sendiri (owner)",
+  getDownloadURL(ref(storage, legacyReceiptB))
+);
+await signOut(auth);
+await signInWithEmailAndPassword(auth, emailA, PASSWORD);
+await expectDenied(
+  "A (setelah unlink) membaca struk lama folder B — arah linkedTo gugur",
+  getDownloadURL(ref(storage, legacyReceiptB))
+);
 
 // --- Cleanup (best-effort) ------------------------------------------------
 try {
@@ -415,6 +626,8 @@ try {
     listSnapshot.docs.map((entry) => deleteDoc(entry.ref).catch(() => {}))
   );
   await deleteDoc(bNewItem).catch(() => {});
+  await deleteDoc(doc(db, "users", uidA, "budget", "katering")).catch(() => {});
+  await deleteDoc(doc(db, "users", uidA, "budget", "dekorasi")).catch(() => {});
   await deleteDoc(doc(db, "users", uidA)).catch(() => {});
   await deleteObject(ref(storage, receiptByB)).catch(() => {});
 } catch {
@@ -423,7 +636,14 @@ try {
 try {
   await signOut(auth);
   await signInWithEmailAndPassword(auth, emailB, PASSWORD);
+  const bChecklist = await getDocs(collection(db, "users", uidB, "checklist"));
+  await Promise.all(
+    bChecklist.docs.map((entry) => deleteDoc(entry.ref).catch(() => {}))
+  );
+  await deleteDoc(doc(db, "users", uidB, "budget", "katering")).catch(() => {});
+  await deleteDoc(doc(db, "users", uidB, "budget", "dekorasi")).catch(() => {});
   await deleteDoc(doc(db, "users", uidB)).catch(() => {});
+  await deleteObject(ref(storage, legacyReceiptB)).catch(() => {});
 } catch {
   /* abaikan */
 }

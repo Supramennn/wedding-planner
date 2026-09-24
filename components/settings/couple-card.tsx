@@ -5,6 +5,7 @@ import { useAuth } from "@/lib/hooks/auth-context";
 import {
   cancelInvite,
   findInviteForEmail,
+  mergeAndClaim,
   unlinkCouple,
 } from "@/lib/couple-service";
 import { saveUserProfile } from "@/lib/user-service";
@@ -29,7 +30,10 @@ export function CoupleCard() {
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   /** Undangan atas email sendiri dari workspace LAIN (kasus kedua-duanya sudah data). */
-  const [foreignInvite, setForeignInvite] = useState<string | null>(null);
+  const [foreignInvite, setForeignInvite] = useState<{
+    uid: string;
+    label: string;
+  } | null>(null);
 
   const ready = !loading && !profileLoading && user && workspaceUid;
   const isPartner = Boolean(ownProfile?.linkedTo);
@@ -50,7 +54,14 @@ export function CoupleCard() {
       .then((invite) => {
         if (cancelled || !invite || invite.uid === user.uid) return;
         if (invite.data.weddingDate) {
-          setForeignInvite(invite.data.email || invite.data.displayName || "");
+          setForeignInvite({
+            uid: invite.uid,
+            label:
+              invite.data.email ||
+              invite.data.displayName ||
+              invite.data.partnerName ||
+              "",
+          });
         }
       })
       .catch(() => {});
@@ -119,6 +130,32 @@ export function CoupleCard() {
       setNotice("Tautan pasangan dilepas.");
     } catch {
       setError("Gagal melepas tautan. Coba lagi.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /**
+   * Kasus kedua akun sudah punya data sendiri (auto-claim sengaja diam):
+   * pasangan memilih — gabungkan data dulu, atau hanya tautkan.
+   */
+  async function handleForeignClaim(mergeData: boolean) {
+    if (busy || !user || !foreignInvite) return;
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      await mergeAndClaim(foreignInvite.uid, user, { mergeData });
+      setNotice(
+        mergeData
+          ? "Data berhasil digabungkan dan kedua akun tertaut."
+          : "Akun tertaut. Data kamu tidak disalin — kamu sekarang memakai data pasangan."
+      );
+      setForeignInvite(null);
+    } catch {
+      setError(
+        "Gagal menautkan/menggabungkan. Periksa koneksi lalu coba lagi."
+      );
     } finally {
       setBusy(false);
     }
@@ -210,11 +247,36 @@ export function CoupleCard() {
       )}
 
       {foreignInvite && (
-        <div className="mt-3 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-          Email kamu juga diundang ke data pernikahan lain
-          {foreignInvite ? ` (${foreignInvite})` : ""}, tetapi akun ini sudah
-          punya data sendiri. Penggabungan dua data butuh fitur merge — belum
-          tersedia.
+        <div className="mt-3 space-y-2 rounded-xl border border-amber-300 bg-amber-50 px-3 py-3 text-xs text-amber-800">
+          <p>
+            Email kamu juga diundang ke data pernikahan lain
+            {foreignInvite.label ? ` (${foreignInvite.label})` : ""}, padahal
+            akun ini sudah punya data sendiri. Pilih cara menggabungkannya:
+          </p>
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <Button
+              size="sm"
+              loading={busy}
+              onClick={() => handleForeignClaim(true)}
+            >
+              Gabungkan data &amp; tautkan
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              loading={busy}
+              onClick={() => handleForeignClaim(false)}
+            >
+              Tautkan saja
+            </Button>
+          </div>
+          <p className="text-[11px] leading-relaxed text-amber-700">
+            <strong>Gabungkan</strong>: checklist, vendor, dan pengeluaran kamu
+            disalin (tanpa duplikat) ke data pasangan; struk disalin ke folder
+            bersama; kolom profil yang sudah terisi pasangan dipertahankan.{" "}
+            <strong>Tautkan saja</strong>: data kamu tidak disalin — kamu akan
+            memakai data pasangan sepenuhnya.
+          </p>
         </div>
       )}
     </Card>

@@ -38,6 +38,14 @@ yarn-error.log*
 .env*
 !.env.local.example
 
+# kredensial & kunci rahasia — JANGAN PERNAH di-commit
+# (dilindungi GitHub push protection; JSON service account Firebase)
+*firebase-adminsdk*.json
+serviceAccount*.json
+service-account*.json
+credentials*.json
+secrets*.json
+
 # vercel
 .vercel
 

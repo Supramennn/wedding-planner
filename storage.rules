@@ -4,6 +4,8 @@ rules_version = '2';
 // Struk pengeluaran disimpan per workspace: users/{uid}/receipts/...
 // Prinsip: PEMILIK workspace atau PASANGAN TERTAUT (kolaborasi Phase 2)
 // yang boleh baca/tulis/hapus; user lain DENY.
+// Pasangan dicek DUA arah (partnerUid ATAU linkedTo di dokumen terkait)
+// supaya pemilik bisa membuka struk lama pasangan hasil merge (Phase 2).
 //
 // Catatan pemisahan rule:
 // - request.resource.size hanya valid saat WRITE (upload); pada READ/DELETE
@@ -18,15 +20,27 @@ service firebase.storage {
       return request.auth != null && request.auth.uid == userId;
     }
 
-    // Pasangan tertaut: bila bukan pemilik, cek partnerUid di dokumen profil
-    // workspace. firestore.get error bila dokumen/field tidak ada → deny
-    // (aman: memang berarti bukan pasangan). || short-circuit menjaga owner.
+    // Pasangan tertaut — DUA arah, via firestore.get() ke dokumen profil:
+    //  1) folder workspace (users/{pemilik}): partnerUid pasangan itu == auth
+    //     → pasangan mengakses struk workspace yang ditautkan;
+    //  2) folder milik pasangan (users/{pasangan}): linkedTo == auth
+    //     → PEMILIK masih bisa membuka struk lama pasangan (hasil merge).
+    // keys().hasAny(...) menjaga dokumen legacy yang belum punya field couple
+    // (mengakses field yang tidak ada memicu error → deny salah sasaran);
+    // dokumen tanpa profil sama sekali → get() error → deny (memang bukan
+    // pasangan). isOwner() di depan membuat pemilik tak pernah kena get().
+    function profileOf(userId) {
+      return firestore.get(/databases/(default)/documents/users/$(userId)).data;
+    }
+
     function isCouple(userId) {
-      return isOwner(userId) || (
-        request.auth != null
-        && firestore.get(/databases/(default)/documents/users/$(userId)).data.partnerUid
-           == request.auth.uid
-      );
+      return isOwner(userId)
+        || (request.auth != null
+            && profileOf(userId).keys().hasAny(['partnerUid'])
+            && profileOf(userId).partnerUid == request.auth.uid)
+        || (request.auth != null
+            && profileOf(userId).keys().hasAny(['linkedTo'])
+            && profileOf(userId).linkedTo == request.auth.uid);
     }
 
     match /users/{userId}/{allPaths=**} {

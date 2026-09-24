@@ -49,6 +49,17 @@ export interface UserProfile {
    * pengiriman ke mantan pasangan. Ditulis via arrayUnion/arrayRemove.
    */
   fcmTokens?: string[];
+
+  // —— Merge data (dua akun sudah punya data sendiri) ——
+
+  /**
+   * uid pasangan yang datanya pernah di-MERGE ke workspace ini.
+   * Penanda idempoten: retry klaim/merge tidak menggandakan salinan.
+   * Ditulis TERAKHIR setelah seluruh langkah penyalinan sukses.
+   */
+  mergedFromUid?: string | null;
+  /** Epoch ms kapan merge dijalankan. */
+  mergedAt?: number | null;
 }
 
 export type ChecklistCategory = (typeof CHECKLIST_CATEGORIES)[number];
