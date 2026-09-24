@@ -35,6 +35,10 @@ function getConfiguredApp(): FirebaseApp {
   return initializeApp(firebaseConfig);
 }
 
+export function getFirebaseApp(): FirebaseApp {
+  return getConfiguredApp();
+}
+
 export function getFirebaseAuth(): Auth {
   return getAuth(getConfiguredApp());
 }

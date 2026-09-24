@@ -12,6 +12,12 @@ const EMPTY_PROFILE = {
   partnerName: "",
   weddingDate: "",
   venue: "",
+  // Field kolaborasi (Phase 2) selalu ada di dokumen baru agar ekspresi
+  // rules tidak pernah error "No such property" pada akses field.
+  partnerEmail: null,
+  partnerUid: null,
+  coupleStatus: null,
+  linkedTo: null,
 } as const;
 
 function userDocPath(uid: string) {
@@ -29,7 +35,19 @@ export async function ensureUserProfile(
 ): Promise<void> {
   const ref = userDocPath(user.uid);
   const snapshot = await getDoc(ref);
-  if (snapshot.exists()) return;
+  if (snapshot.exists()) {
+    // Dokumen sudah ada: isi HANYA field yang belum ada (tanpa menimpa data).
+    // Kebutuhan pasca-klaim undangan — dokumen pasangan bisa dibuat lebih
+    // dulu oleh couple-service sebelum fungsi ini dipanggil saat login.
+    const data = snapshot.data();
+    const patch: Partial<UserProfile> = {};
+    if (data.email === undefined) patch.email = user.email ?? "";
+    if (data.createdAt === undefined) patch.createdAt = Date.now();
+    if (Object.keys(patch).length > 0) {
+      await setDoc(ref, patch, { merge: true });
+    }
+    return;
+  }
 
   await setDoc(
     ref,

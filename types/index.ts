@@ -28,6 +28,27 @@ export interface UserProfile {
   totalBudget?: number;
   /** Epoch ms. */
   createdAt: number;
+
+  // —— Kolaborasi pasangan (Phase 2: 2 akun, 1 data pernikahan) ——
+
+  /** Email pasangan yang diundang (diisi pemilik workspace saat membuat undangan). */
+  partnerEmail?: string;
+  /** uid akun pasangan yang sudah bergabung (diisi saat klaim undangan). */
+  partnerUid?: string;
+  /** Status tautan: "invited" = undangan dikirim, "linked" = sudah menyatu. */
+  coupleStatus?: "invited" | "linked";
+  /**
+   * Hanya ada di dokumen milik pasangan: uid pemilik workspace yang
+   * ditautkan. Semua data pernikahan dibaca dari users/{linkedTo}.
+   */
+  linkedTo?: string;
+  /**
+   * Token FCM milik AKUN INI (push reminder, Phase 2). Setiap akun
+   * menyimpan token di dokumennya sendiri; cron mengumpulkan token dari
+   * workspace + pasangan tertaut, sehingga lepas tautan langsung memutus
+   * pengiriman ke mantan pasangan. Ditulis via arrayUnion/arrayRemove.
+   */
+  fcmTokens?: string[];
 }
 
 export type ChecklistCategory = (typeof CHECKLIST_CATEGORIES)[number];

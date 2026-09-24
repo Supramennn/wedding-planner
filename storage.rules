@@ -1,13 +1,16 @@
 rules_version = '2';
 
 // WedPlan — Firebase Storage Rules
-// Struk pengeluaran disimpan per user: users/{uid}/receipts/...
-// Prinsip: hanya pemilik yang boleh baca/tulis/hapus; user lain DENY.
+// Struk pengeluaran disimpan per workspace: users/{uid}/receipts/...
+// Prinsip: PEMILIK workspace atau PASANGAN TERTAUT (kolaborasi Phase 2)
+// yang boleh baca/tulis/hapus; user lain DENY.
 //
 // Catatan pemisahan rule:
 // - request.resource.size hanya valid saat WRITE (upload); pada READ/DELETE
 //   request.resource = null → evaluasi propertinya error dan menolak operasi.
 //   Karena itu read/write/delete dipisah menjadi allow terpisah.
+// - Storage rules tidak punya request.auth.uid vs path couple → cek tautan
+//   dilakukan via firestore.get() ke dokumen profil (rules v2 cross-service).
 service firebase.storage {
   match /b/{bucket}/o {
 
@@ -15,14 +18,25 @@ service firebase.storage {
       return request.auth != null && request.auth.uid == userId;
     }
 
+    // Pasangan tertaut: bila bukan pemilik, cek partnerUid di dokumen profil
+    // workspace. firestore.get error bila dokumen/field tidak ada → deny
+    // (aman: memang berarti bukan pasangan). || short-circuit menjaga owner.
+    function isCouple(userId) {
+      return isOwner(userId) || (
+        request.auth != null
+        && firestore.get(/databases/(default)/documents/users/$(userId)).data.partnerUid
+           == request.auth.uid
+      );
+    }
+
     match /users/{userId}/{allPaths=**} {
-      // Baca struk milik sendiri (mis. tombol "Lihat struk").
-      allow read: if isOwner(userId);
+      // Baca struk milik sendiri / pasangan (mis. tombol "Lihat struk").
+      allow read: if isCouple(userId);
       // Upload: maksimal 5 MB (sinkron dengan validasi di aplikasi).
-      allow write: if isOwner(userId)
+      allow write: if isCouple(userId)
                    && request.resource.size < 5 * 1024 * 1024;
       // Hapus file struk (dipanggil saat pengeluaran dihapus).
-      allow delete: if isOwner(userId);
+      allow delete: if isCouple(userId);
     }
   }
 }

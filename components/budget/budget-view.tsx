@@ -46,12 +46,19 @@ const LEVEL_BADGE_LABEL = {
 
 /** Modul Budget Tracker (FR-12 s/d FR-16). */
 export function BudgetView() {
-  const { user, profile, loading: authLoading, profileLoading } = useAuth();
+  const {
+    workspaceUid,
+    profile,
+    loading: authLoading,
+    profileLoading,
+  } = useAuth();
   const {
     items: categories,
     loading: budgetLoading,
     error,
-  } = useCollection<BudgetCategory>(user ? budgetPath(user.uid) : null);
+  } = useCollection<BudgetCategory>(
+    workspaceUid ? budgetPath(workspaceUid) : null
+  );
 
   const [totalOpen, setTotalOpen] = useState(false);
   const [allocationTarget, setAllocationTarget] =
@@ -156,7 +163,7 @@ export function BudgetView() {
         <Button
           size="md"
           onClick={() => setExpenseTarget({ mode: "add" })}
-          disabled={!user}
+          disabled={!workspaceUid}
         >
           + Catat pengeluaran
         </Button>
@@ -186,7 +193,7 @@ export function BudgetView() {
             variant="outline"
             size="sm"
             onClick={() => setTotalOpen(true)}
-            disabled={!user}
+            disabled={!workspaceUid}
           >
             {totalBudget > 0 ? "Ubah total" : "Atur total"}
           </Button>
@@ -319,7 +326,7 @@ export function BudgetView() {
                 <Button
                   variant="outline"
                   size="sm"
-                  disabled={!user}
+                  disabled={!workspaceUid}
                   onClick={() =>
                     setAllocationTarget({
                       categoryName: row.name,
@@ -361,7 +368,7 @@ export function BudgetView() {
               action={
                 <Button
                   onClick={() => setExpenseTarget({ mode: "add" })}
-                  disabled={!user}
+                  disabled={!workspaceUid}
                 >
                   Catat pengeluaran
                 </Button>
@@ -440,10 +447,10 @@ export function BudgetView() {
         onClose={() => setTotalOpen(false)}
         title="Total budget pernikahan"
       >
-        {totalOpen && user && (
+        {totalOpen && workspaceUid && (
           <TotalBudgetForm
             key={totalBudget}
-            uid={user.uid}
+            uid={workspaceUid}
             current={totalBudget}
             onClose={() => setTotalOpen(false)}
           />
@@ -456,10 +463,10 @@ export function BudgetView() {
         onClose={() => setAllocationTarget(null)}
         title="Atur alokasi kategori"
       >
-        {allocationTarget && user && (
+        {allocationTarget && workspaceUid && (
           <AllocationForm
             key={allocationTarget.categoryName}
-            uid={user.uid}
+            uid={workspaceUid}
             totalBudget={totalBudget}
             categoryName={allocationTarget.categoryName}
             current={allocationTarget.current}
@@ -478,14 +485,14 @@ export function BudgetView() {
             : "Catat pengeluaran"
         }
       >
-        {expenseTarget && user && (
+        {expenseTarget && workspaceUid && (
           <ExpenseForm
             key={
               expenseTarget.mode === "edit"
                 ? `edit-${expenseTarget.categoryName}-${expenseTarget.index}`
                 : "add"
             }
-            uid={user.uid}
+            uid={workspaceUid}
             mode={expenseTarget.mode}
             expense={expenseTarget.mode === "edit" ? expenseTarget.expense : null}
             initialCategoryName={
@@ -525,13 +532,13 @@ export function BudgetView() {
             size="lg"
             loading={busyKey === (deleteTarget ? `${deleteTarget.categoryName}-${deleteTarget.index}` : null)}
             onClick={() =>
-              user &&
+              workspaceUid &&
               deleteTarget &&
               runAction(
                 `${deleteTarget.categoryName}-${deleteTarget.index}`,
                 async () => {
                   await deleteExpense(
-                    user.uid,
+                    workspaceUid,
                     deleteTarget.categoryName,
                     deleteTarget.index
                   );

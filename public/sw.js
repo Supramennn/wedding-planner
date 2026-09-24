@@ -9,7 +9,7 @@
  *
  * Ganti VERSION setelah mengubah file ini agar SW lama langsung dibersihkan.
  */
-const VERSION = "v1";
+const VERSION = "v2";
 const CACHE_NAME = `wedplan-${VERSION}`;
 const OFFLINE_URL = "/offline";
 
@@ -64,6 +64,31 @@ function isStaticAsset(pathname) {
   // Chunk Next ber-hash: aman disimpan permanen selama cache aktif.
   return pathname.startsWith("/_next/static/");
 }
+
+// Push notification (Phase 2): klik notifikasi pengingat → fokuskan/pindahkan
+// jendela PWA ke rute yang sesuai (data.url dari payload FCM).
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const target = (event.notification.data && event.notification.data.url) || "/";
+  event.waitUntil(
+    clients
+      .matchAll({ type: "window", includeUncontrolled: true })
+      .then((windowClients) => {
+        const origin = self.location.origin;
+        for (const client of windowClients) {
+          if (client.url.startsWith(origin) && "focus" in client) {
+            client.focus();
+            // navigate tidak didukung Safari — fokus saja di sana.
+            if (typeof client.navigate === "function") {
+              client.navigate(target);
+            }
+            return undefined;
+          }
+        }
+        return clients.openWindow(target);
+      })
+  );
+});
 
 self.addEventListener("fetch", (event) => {
   const { request } = event;

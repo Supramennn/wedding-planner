@@ -5,24 +5,40 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
 import { onAuthStateChanged, signOut, type User } from "firebase/auth";
 import { doc, onSnapshot } from "firebase/firestore";
 import { getDb, getFirebaseAuth, isFirebaseConfigured } from "@/lib/firebase";
+import { tryAutoClaimInvite } from "@/lib/couple-service";
 import type { UserProfile } from "@/types";
 
 /**
  * AuthProvider — single source of truth untuk status autentikasi & profil
  * pernikahan di seluruh aplikasi. Semua halaman membaca dari sini,
  * tidak ada duplikasi state user.
+ *
+ * Kolaborasi pasangan (Phase 2):
+ * - Dokumen SENDIRI (users/{user.uid}) selalu di-snapshot → `ownProfile`.
+ *   Bila ownProfile.linkedTo terisi, akun ini pasangan dari workspace itu.
+ * - `workspaceUid` = linkedTo milik sendiri ?? uid sendiri → SEMUA modul
+ *   memakai workspaceUid, sehingga dua akun membaca/menulis satu data.
+ * - `profile` = snapshot users/{workspaceUid} (realtime, onSnapshot) —
+ *   perubahan pasangan lain langsung tersinkron tanpa refresh.
+ * - Auto-claim: bila akun baru (belum onboarding) punya undangan atas
+ *   emailnya, tautkan otomatis sekali per sesi login.
  */
 
 interface AuthContextValue {
   user: User | null;
-  /** Profil users/{uid}; null sampai onboarding terisi. */
+  /** Profil workspace users/{workspaceUid} (untuk pasangan = dokumen pemilik). */
   profile: UserProfile | null;
+  /** Dokumen profil milik akun INI (memuat linkedTo/partnerUid bila ada). */
+  ownProfile: UserProfile | null;
+  /** uid tempat seluruh data pernikahan disimpan (null bila belum login). */
+  workspaceUid: string | null;
   /** true selama menunggu status auth pertama. */
   loading: boolean;
   /** true selama menunggu snapshot profil pertama (user sudah login). */
@@ -36,12 +52,19 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
-  const [profile, setProfile] = useState<UserProfile | null>(null);
-  /** uid yang profilnya sudah ter-load (null = belum ada snapshot). */
-  const [profileKey, setProfileKey] = useState<string | null>(null);
+  const [ownProfile, setOwnProfile] = useState<UserProfile | null>(null);
+  /** uid dokumen sendiri yang sudah ter-snapshot (null = belum ada snapshot). */
+  const [ownKey, setOwnKey] = useState<string | null>(null);
+  /** Profil workspace (hanya dipakai bila beda dokumen dari ownProfile). */
+  const [workspaceProfile, setWorkspaceProfile] = useState<UserProfile | null>(
+    null
+  );
+  const [workspaceKey, setWorkspaceKey] = useState<string | null>(null);
   // Loading awal mengikuti ketersediaan konfigurasi (.env.local) — bukan
   // diset di dalam effect, agar tidak ada cascade render.
   const [loading, setLoading] = useState(() => isFirebaseConfigured);
+  /** Anti dobel: auto-claim hanya dicoba sekali per akun per sesi. */
+  const claimTriedFor = useRef<string | null>(null);
 
   // Status autentikasi (persistensi sesi Firebase).
   useEffect(() => {
@@ -50,42 +73,90 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const auth = getFirebaseAuth();
     const unsubscribe = onAuthStateChanged(auth, (nextUser) => {
       setUser(nextUser);
-      setProfile(null);
-      setProfileKey(null);
+      setOwnProfile(null);
+      setOwnKey(null);
+      setWorkspaceProfile(null);
+      setWorkspaceKey(null);
       setLoading(false);
     });
 
     return unsubscribe;
   }, []);
 
-  // Profil pernikahan realtime (onSnapshot) selama user login.
+  // Snapshot dokumen profil SENDIRI (realtime) selama user login.
   useEffect(() => {
     if (!user || !isFirebaseConfigured) return;
 
     const unsubscribe = onSnapshot(
       doc(getDb(), "users", user.uid),
       (snapshot) => {
-        setProfile(snapshot.exists() ? (snapshot.data() as UserProfile) : null);
-        setProfileKey(user.uid);
+        setOwnProfile(snapshot.exists() ? (snapshot.data() as UserProfile) : null);
+        setOwnKey(user.uid);
       },
       () => {
         // Error jaringan/rules: hentikan loading, modul menampilkan empty state.
-        setProfile(null);
-        setProfileKey(user.uid);
+        setOwnProfile(null);
+        setOwnKey(user.uid);
       }
     );
 
     return unsubscribe;
   }, [user]);
 
+  // Resolusi workspace: pasangan memakai dokumen pemilik (linkedTo).
+  const workspaceUid = user ? (ownProfile?.linkedTo ?? user.uid) : null;
+  const isLinkedPartner = Boolean(
+    user && ownProfile?.linkedTo && ownProfile.linkedTo !== user.uid
+  );
+
+  // Snapshot workspace TERPISAH hanya bila linkedTo menunjuk dokumen lain.
+  useEffect(() => {
+    if (!isLinkedPartner || !workspaceUid || !isFirebaseConfigured) return;
+
+    const unsubscribe = onSnapshot(
+      doc(getDb(), "users", workspaceUid),
+      (snapshot) => {
+        setWorkspaceProfile(
+          snapshot.exists() ? (snapshot.data() as UserProfile) : null
+        );
+        setWorkspaceKey(workspaceUid);
+      },
+      () => {
+        setWorkspaceProfile(null);
+        setWorkspaceKey(workspaceUid);
+      }
+    );
+
+    return unsubscribe;
+  }, [isLinkedPartner, workspaceUid]);
+
+  // Auto-claim undangan pasangan (Phase 2): hanya untuk akun yang belum
+  // onboarding solo — saat ownProfile pertama tiba & belum tertaut.
+  useEffect(() => {
+    if (!user || !isFirebaseConfigured) return;
+    if (ownKey !== user.uid) return; // tunggu snapshot dokumen sendiri dulu
+    if (ownProfile?.linkedTo) return; // sudah tertaut
+    if (ownProfile?.weddingDate) return; // sudah punya data sendiri (butuh merge)
+    if (claimTriedFor.current === user.uid || !user.email) return;
+    claimTriedFor.current = user.uid;
+    // Best-effort: gagal (offline/rules) dicoba lagi pada login berikutnya.
+    tryAutoClaimInvite(user).catch(() => {});
+  }, [user, ownProfile, ownKey]);
+
   const value = useMemo<AuthContextValue>(() => {
+    const profile = isLinkedPartner ? workspaceProfile : ownProfile;
     const profileLoading = Boolean(
-      isFirebaseConfigured && user && profileKey !== user.uid
+      isFirebaseConfigured &&
+        user &&
+        (ownKey !== user.uid ||
+          (isLinkedPartner && workspaceKey !== workspaceUid))
     );
 
     return {
       user,
       profile,
+      ownProfile,
+      workspaceUid,
       loading,
       profileLoading,
       isOnboarded: Boolean(profile?.weddingDate),
@@ -94,7 +165,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         await signOut(getFirebaseAuth());
       },
     };
-  }, [user, profile, profileKey, loading]);
+  }, [
+    user,
+    ownProfile,
+    ownKey,
+    workspaceProfile,
+    workspaceKey,
+    workspaceUid,
+    isLinkedPartner,
+    loading,
+  ]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

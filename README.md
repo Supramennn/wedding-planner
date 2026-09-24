@@ -31,8 +31,10 @@ WedPlan membantu calon pengantin mengelola **checklist, budget, dan vendor** per
 | Budget | FR-12…16 | Total budget (edit kapan saja); alokasi per kategori via **nominal atau persentase**; pengeluaran + **foto struk → Firebase Storage**; chart Recharts **alokasi vs realisasi**; warna hijau <70% / kuning 70–99% / merah ≥100% |
 | Vendor | FR-17…19 | Field lengkap + alur status Dihubungi→Nego→Deal→DP→Lunas; **dua mode tampilan**: list (sortable) & timeline (urut deadline); badge **H-7 / H-3 / H-1** + "Terlambat"/"Hari ini" |
 | PWA | FR-20…23 | Manifest lengkap (standalone, ikon 192/512/maskable), service worker + halaman `/offline`, responsive mobile-first |
+| **Kolaborasi pasangan** *(Phase 2)* | — | **2 akun → 1 data pernikahan**: undang via email → tautan otomatis (auto-claim); seluruh modul realtime dua arah; lepas tautan kapan saja |
+| **Pengingat push** *(Phase 2)* | — | **FCM**: notifikasi H-7/H-3/H-1/H-0 jatuh tempo pembayaran vendor & tenggat checklist; dikirim cron Vercel (jendela 07.00–21.00 WIB, dedupe harian, token mati di-prune) |
 
-**Di luar cakupan MVP** (dicatat, tidak diimplementasikan): kolaborasi 2 akun, push FCM, integrasi undangan, marketplace vendor, role wedding organizer, payment gateway → lihat [Future Enhancement](#11-future-enhancement-di-luar-mvp).
+**Di luar cakupan MVP** (dicatat, tidak diimplementasikan): integrasi undangan, marketplace vendor, role wedding organizer, payment gateway, merge dua dataset pasangan yang sudah sama-sama terisi → lihat [Future Enhancement](#11-future-enhancement-di-luar-mvp).
 
 ## 2. Tech Stack
 
@@ -41,7 +43,7 @@ WedPlan membantu calon pengantin mengelola **checklist, budget, dan vendor** per
 | Frontend | **Next.js 16.3.6** (App Router, Turbopack untuk build; dev dikunci `--webpack`) · **React 19.2** · TypeScript |
 | Styling | **Tailwind CSS v4** |
 | Animasi | **Framer Motion 13** dengan `MotionConfig reducedMotion="user"` (aksesibilitas) |
-| Backend | **Firebase 12**: Authentication, Firestore (realtime), Storage |
+| Backend | **Firebase 12**: Authentication, Firestore (realtime), Storage · **FCM** push dikirim `firebase-admin` via Vercel cron |
 | Chart | **Recharts 3** |
 | Hosting | **Vercel** · PWA: service worker native (`public/sw.js`) |
 
@@ -63,6 +65,8 @@ npm run dev                          # = next dev --webpack → http://localhost
 2. **Authentication → Sign-in method** → aktifkan **Email/Password** dan **Google**.
 3. **Firestore Database → Create database** (production mode, region terdekat).
 4. **Storage → Get started**.
+5. **(Opsional — pengingat push)** Project settings → **Cloud Messaging → Web Push certificates** → *Generate keypair* → salin VAPID public key ke `NEXT_PUBLIC_FIREBASE_VAPID_KEY`.
+6. **(Opsional — pengingat push)** Project settings → **Service accounts → Generate new private key** → tempel isi file JSON utuh ke `FIREBASE_SERVICE_ACCOUNT` (hanya untuk server/Vercel — jangan commit) dan buat string acak `CRON_SECRET` (wajib sama dengan nilai di Vercel).
 
 Selama `.env.local` masih kosong, aplikasi tetap bisa dibuka — semua halaman menampilkan **empty state / pesan "Firebase belum dikonfigurasi"** yang jelas (tanpa crash).
 
@@ -97,12 +101,18 @@ lib/
   aggregate.ts               # Statistik checklist/budget/vendor (dipakai dashboard & modul)
   collection-paths.ts        # Path Firestore (string) — satu tempat
   default-checklist.ts       # Template 19 tugas default (FR-02/FR-08)
+  couple-service.ts          # Kolaborasi pasangan: cari/klaim/batal undangan, unlink
+  push/client.ts             # Klien FCM: izin notifikasi + simpan/hapus token
   *-service.ts               # Tulis-baca Firestore/Storage per modul
-  hooks/                     # auth-context, auth-guard, guest-guard, use-collection (realtime)
+  hooks/                     # auth-context (resolusi workspace + auto-claim), auth-guard,
+                             # guest-guard, use-collection (realtime)
+app/api/cron/reminders/route.ts  # Cron FCM: kirim pengingat deadline (ditandatangani CRON_SECRET)
 scripts/
   generate-icons.mjs         # Generator PNG ikon (tanpa dependensi)
   test-rules-isolation.mjs   # Uji isolasi rules A vs B (lihat bagian 6)
-public/sw.js                 # Service worker (FR-21)
+  test-couple-rules.mjs      # Uji rules kolaborasi pasangan (lihat bagian 6)
+public/sw.js                 # Service worker (FR-21) + handler notificationclick (push)
+vercel.json                  # Vercel Cron → /api/cron/reminders (hourly)
 firestore.rules, storage.rules, firebase.json
 ```
 
@@ -114,6 +124,8 @@ Sesuai PRD Section 8 (Firestore):
 users/{userId}
   - email, displayName, partnerName, weddingDate, venue, createdAt
   - totalBudget*            (*field tambahan FR-12 — lihat catatan di bawah)
+  - partnerEmail*, partnerUid*, coupleStatus*, linkedTo*   (kolaborasi Phase 2)
+  - fcmTokens*              (*token FCM milik AKUN INI — push Phase 2)
 
 users/{userId}/checklist/{itemId}
   - title, category, dueDate, isCompleted, createdAt
@@ -123,6 +135,9 @@ users/{userId}/budget/{categoryId}
 
 users/{userId}/vendors/{vendorId}
   - name, category, contact, status, dealAmount, paymentDeadline, notes, createdAt
+
+users/{userId}/reminderLog/{logId}      (tulis HANYA Admin SDK server; client DENY)
+  - createdAt, successCount, title      (dedupe pengingat push per item+tanggal)
 ```
 
 **Catatan implementasi:**
@@ -131,10 +146,12 @@ users/{userId}/vendors/{vendorId}
 - `categoryId` = **slug determinik** dari nama kategori (mis. `Legal/Dokumen` → `legal-dokumen`) sehingga alokasi selalu upsert, tidak pernah menggandakan dokumen.
 - Item `expenses` diedit berbasis **index** dalam array (skema persis PRD, tanpa id per-transaksi) — aman untuk single-user.
 - **Storage:** struk di `users/{uid}/receipts/{timestamp}-{nama}`, maks **5 MB** (divalidasi di aplikasi *dan* rules).
+- **Kolaborasi (Phase 2):** data pernikahan tetap di bawah `users/{pemilik}`; pasangan menautkan akunnya lewat `linkedTo` di dokumennya sendiri. `workspaceUid = linkedTo ?? uid sendiri` (lihat `auth-context.tsx`) — semua modul membaca path dari `workspaceUid`, sehingga dua akun realtime pada dataset yang sama. Field couple bersifat **additive** (dokumen lama tanpa field ini tetap sah — rules menanganinya).
+- **Push (Phase 2):** `fcmTokens` ada di dokumen SETIAP akun; cron mengumpulkan token workspace + `partnerUid` → unlink otomatis memutus kiriman ke mantan pasangan.
 
 ## 6. Keamanan (Security Rules) & Uji Isolasi
 
-**Prinsip: owner-only, default deny.** `firestore.rules` hanya membuka `users/{ownUserId}/**` untuk `request.auth.uid == userId` — path lain otomatis ditolak. `storage.rules` memisahkan `read` / `write` (maks 5 MB) / `delete`, semuanya owner-only.
+**Prinsip: owner-only, default deny.** `firestore.rules` hanya membuka `users/{ownUserId}/**` — path lain otomatis ditolak. Untuk **kolaborasi Phase 2**, pasangan tertaut (`partnerUid == request.auth.uid`, dicek via `get()` ke dokumen induk — path tetap, tervalidasi sekali per list) mendapat akses penuh ke workspace-nya; penerima undangan hanya bisa membaca profil ber-`partnerEmail` sama dengan token emailnya dan mengklaim dua field tautan. `storage.rules` memisahkan `read` / `write` (maks 5 MB) / `delete`, dengan cek pasangan via `firestore.get()` (rules v2 cross-service).
 
 > Rules dipisah per operasi karena `request.resource` bernilai `null` saat READ/DELETE — menggabungkannya dengan `request.resource.size` akan menolak operasi tersebut.
 
@@ -152,8 +169,10 @@ firebase deploy --only firestore:rules,storage
 
 ```bash
 npx firebase-tools emulators:exec --only auth,firestore,storage \
-  --project demo-wedplan "node scripts/test-rules-isolation.mjs --emulator"
+  --project demo-wedplan "node scripts/test-rules-isolation.mjs --emulator && node scripts/test-couple-rules.mjs --emulator"
 ```
+
+Skrip **`test-couple-rules.mjs`** (Phase 2) menambah 29 skenario kolaborasi: temukan undangan via query email sendiri → klaim dua langkah → pasangan membaca/menulis checklist & profil workspace, upload struk ke folder pasangan (semua `PASS`); pihak ketiga C ditolak total termasuk upaya klaim; setelah unlink oleh pemilik, akses pasangan gugur kembali.
 
 **Jalur B — proyek asli (setelah rules di-deploy):**
 
@@ -173,10 +192,12 @@ Skrip menguji 10+ skenario: A akses data sendiri (wajib lolos), akses tanpa logi
 3. Isi **Environment Variables** (Production *dan* Preview):
    - `NEXT_PUBLIC_FIREBASE_API_KEY`, `_AUTH_DOMAIN`, `_PROJECT_ID`, `_STORAGE_BUCKET`, `_MESSAGING_SENDER_ID`, `_APP_ID`
    - `NEXT_PUBLIC_APP_URL=https://<domain-kamu>` (untuk URL absolut manifest/PWA).
+   - *(Opsional — pengingat push)* `NEXT_PUBLIC_FIREBASE_VAPID_KEY` (Web Push certificates), `CRON_SECRET` (string acak), `FIREBASE_SERVICE_ACCOUNT` (JSON service account utuh).
 4. **Deploy** → dapatkan domain (mis. `wedplan.vercel.app` atau domain sendiri).
 5. Firebase Console → Authentication → **Settings → Authorized domains** → tambahkan domain Vercel (wajib untuk login Google).
 6. Deploy rules ke Firebase (bagian [6](#6-keamanan-security-rules--uji-isolasi)) **sebelum** user pertama mendaftar.
-7. Uji live: daftar → onboarding → isi 3 modul → install PWA (bagian 10).
+7. **(Opsional — push):** set 3 env push di Vercel (di atas) lalu deploy ulang — `vercel.json` otomatis mendaftarkan cron hourly ke `/api/cron/reminders`. Uji manual: `curl -H "Authorization: Bearer $CRON_SECRET" https://<domain>/api/cron/reminders` (tanpa header → `401`, di luar jendela WIB → `{"skipped":"outside-send-window"}`).
+8. Uji live: daftar → onboarding → isi 3 modul → install PWA (bagian 10).
 
 ## 8. PWA (Manifest, Service Worker, Offline)
 
@@ -184,7 +205,7 @@ Skrip menguji 10+ skenario: A akses data sendiri (wajib lolos), akses tanpa logi
 |---|---|
 | `app/manifest.ts` | Manifest: `name/short_name`, `start_url: /dashboard`, `display: standalone`, `theme_color: #e11d48`, ikon 192 + 512 + maskable |
 | `public/icons/*` | Ikon hasil `npm run icons` (hati rose, prosedural) + `apple-touch-icon` 180px (ada juga salinan di root `/apple-touch-icon.png` untuk fallback iOS) |
-| `public/sw.js` | Service worker: **navigasi network-first → cache → `/offline`**; `/_next/static/*` cache-first; lainnya stale-while-revalidate; **cross-origin (Firebase) tidak di-cache**; precache 10 route + manifest |
+| `public/sw.js` | Service worker: **navigasi network-first → cache → `/offline`**; `/_next/static/*` cache-first; lainnya stale-while-revalidate; **cross-origin (Firebase) tidak di-cache**; precache 10 route + manifest; **`notificationclick`** → klik notifikasi pengingat membuka/pindah ke rute terkait (`data.url`) |
 | `components/providers/sw-register.tsx` | Registrasi SW **hanya di production** (dev sengaja tanpa SW agar tidak kena cache stale) |
 | `next.config.ts` | Header `/sw.js`: `Cache-Control: no-cache` + `Service-Worker-Allowed: /` |
 
@@ -218,6 +239,8 @@ Skrip menguji 10+ skenario: A akses data sendiri (wajib lolos), akses tanpa logi
 | Tampilan CSS aneh di dev | Pastikan `npm run dev` (webpack), bukan `next dev` biasa |
 | Halaman offline terus-muncul padahal online | Buka DevTools → Application → Service Workers → *Unregister*, atau bump `VERSION` |
 | Struk gagal diunggah | Ukuran >5 MB, Storage belum aktif, atau `storage.rules` belum di-deploy |
+| Pengingat push tidak masuk | Env push belum lengkap (VAPID/CRON_SECRET/service account) · belum klik "Aktifkan pengingat" · `permission-denied` di **Vercel → Logs** untuk cron = `CRON_SECRET` beda antara Vercel & kode · `503` = `FIREBASE_SERVICE_ACCOUNT` kosong/tidak valid · di luar jendela 07.00–21.00 WIB memang di-skip |
+| Pasangan tidak bisa akses data | Undangan belum diklaim (pasangan harus daftar/masuk **dengan email yang diundang**) · `firestore.rules`/`storage.rules` terbaru belum di-deploy · kedua akun sudah punya data sendiri → butuh merge (belum tersedia) |
 
 ## 10. Checklist Verifikasi (Definition of Done)
 
@@ -231,20 +254,24 @@ Skrip menguji 10+ skenario: A akses data sendiri (wajib lolos), akses tanpa logi
   - [ ] Budget: set total → alokasi % dan Rp → catat pengeluaran + struk → chart & warna sesuai ambang; sisa budget benar.
   - [ ] Vendor: 2 mode tampilan; deadline 7/3/1 hari ke depan menampilkan badge H-7/H-3/H-1; status berpindah tahap.
 - [ ] **Rules isolation PASS** (jalur A/B/manual di [bagian 6](#6-keamanan-security-rules--uji-isolasi)).
+- [ ] **Kolaborasi pasangan**: undang dari Pengaturan → pasangan daftar dengan email itu → keduanya masuk dashboard yang sama; edit checklist di A muncul realtime di B; C (akun ketiga) tetap ditolak; unlink memutus akses B.
+- [ ] **Push reminder**: Pengaturan → "Aktifkan pengingat" (izin diberikan, status Diizinkan) → cron terjadwal; uji `curl` endpoint cron dengan `CRON_SECRET` mengembalikan JSON `ok:true`; notifikasi masuk di HP saat item deadline H-1/H-0; klik notifikasi membuka rute terkait.
 - [ ] **Live** di domain Vercel dengan Firebase aktif (URL dicatat di sini setelah deploy).
 
 ## 11. Future Enhancement (di luar MVP)
 
-Sesuai PRD (Out-of-Scope + Roadmap Fase 2) — **belum dan tidak boleh diimplementasikan di MVP ini**:
+Sesuai PRD (Out-of-Scope + Roadmap Fase 2). **Kolaborasi 2 akun & push FCM sudah diimplementasikan (Phase 2)** — sisanya belum dan tidak boleh diimplementasikan di MVP:
 
-1. Kolaborasi realtime **2 akun pasangan** dalam 1 data pernikahan.
-2. **Push notification** reminder deadline (Firebase Cloud Messaging).
-3. **Integrasi** ke produk wedding invitation Nexus Diji (satu akun untuk keduanya / cross-sell).
-4. **Vendor marketplace / direktori** vendor pihak ketiga.
-5. Mode **wedding organizer** (multi-client, role planner).
-6. **Payment gateway** / transaksi di dalam aplikasi.
+1. **Merge dua dataset pasangan** bila kedua akun sudah sama-sama onboarding (otomatis-claim sengaja hanya untuk akun yang belum punya data — lihat catatan di bawah).
+2. **Integrasi** ke produk wedding invitation Nexus Diji (satu akun untuk keduanya / cross-sell).
+3. **Vendor marketplace / direktori** vendor pihak ketiga.
+4. Mode **wedding organizer** (multi-client, role planner).
+5. **Payment gateway** / transaksi di dalam aplikasi.
 
-**Catatan keputusan implementasi** (kandidat perbaikan fase 2, bukan fitur baru):
+**Catatan keputusan implementasi** (kandidat perbaikan, bukan fitur baru):
+
+- **Kolaborasi pasangan (Phase 2)** — undangan via **email** (`partnerEmail` + auto-claim sekali per sesi di `auth-context`) alih-alih kode manual: tanpa langkah salin-tempel, tautan terjadi otomatis saat pasangan login. Data tetap di path PRD `users/{pemilik}` (tanpa migrasi); `workspaceUid = linkedTo ?? uid`. Klaim dibatasi rules `hasOnly(['partnerUid','coupleStatus'])` sehingga penerima undangan tidak bisa mengubah data lain sebelum tautan sah. Kedua akun dianggap **co-owner penuh** (model kepercayaan: pasangan = satu tim).
+- **Push FCM (Phase 2)** — pengiriman **server-side** via `firebase-admin` di route cron Vercel (klien tidak pernah memegang kredensial); dedupe `reminderLog` per item+tanggal agar hourly-cron tidak spam; token disimpan **per akun** (bukan gabungan workspace) agar unlink otomatis memutus kiriman ke mantan pasangan; jendela kirim 07.00–21.00 WIB agar tidak mengganggu malam. Bila plan Vercel membatasi jadwal cron, cukup ubah `schedule` di `vercel.json` (endpoint tetap aman & dedupe).
 
 - `totalBudget` disimpan di `users/{userId}` — lokasi tidak dispesifikasi PRD untuk FR-12.
 - Service worker **native** (`public/sw.js`) alih-alih `next-pwa` — PRD mengizinkan keduanya; plugin `next-pwa` tidak kompatibel dengan toolchain Next 16.

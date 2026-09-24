@@ -23,9 +23,9 @@ const ACTION_ERROR =
 
 /** Modul Timeline Vendor (FR-17 s/d FR-19). */
 export function VendorView() {
-  const { user } = useAuth();
+  const { workspaceUid } = useAuth();
   const { items: vendors, loading, error } = useCollection<Vendor>(
-    user ? vendorsPath(user.uid) : null,
+    workspaceUid ? vendorsPath(workspaceUid) : null,
     { orderBy: { field: "createdAt" } }
   );
 
@@ -106,7 +106,7 @@ export function VendorView() {
         <Button
           size="md"
           onClick={() => setFormTarget({ mode: "add" })}
-          disabled={!user}
+          disabled={!workspaceUid}
         >
           + Tambah vendor
         </Button>
@@ -189,10 +189,10 @@ export function VendorView() {
         onClose={() => setFormTarget(null)}
         title={formTarget?.mode === "edit" ? "Ubah vendor" : "Tambah vendor"}
       >
-        {formTarget && user && (
+        {formTarget && workspaceUid && (
           <VendorForm
             key={formTarget.mode === "edit" ? formTarget.vendor.id : "new"}
-            uid={user.uid}
+            uid={workspaceUid}
             mode={formTarget.mode}
             vendor={formTarget.mode === "edit" ? formTarget.vendor : null}
             onClose={() => setFormTarget(null)}
@@ -226,10 +226,10 @@ export function VendorView() {
             size="lg"
             loading={busyId === pendingDelete?.id}
             onClick={() =>
-              user &&
+              workspaceUid &&
               pendingDelete &&
               runAction(pendingDelete.id, async () => {
-                await deleteVendor(user.uid, pendingDelete.id);
+                await deleteVendor(workspaceUid, pendingDelete.id);
                 setPendingDelete(null);
               })
             }

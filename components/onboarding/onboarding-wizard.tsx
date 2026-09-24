@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
 import { useAuth } from "@/lib/hooks/auth-context";
@@ -29,7 +29,13 @@ const STEPS = [
 /** Wizard onboarding 3 langkah (FR-02, FR-03). */
 export function OnboardingWizard() {
   const router = useRouter();
-  const { user, profile } = useAuth();
+  const { user, profile, workspaceUid, isOnboarded } = useAuth();
+
+  // Safety net: bila tautan pasangan otomatis terclaim (atau onboarding
+  // sudah selesai), langsung ke dashboard — wizard tidak boleh tampil.
+  useEffect(() => {
+    if (isOnboarded) router.replace("/dashboard");
+  }, [isOnboarded, router]);
 
   const [step, setStep] = useState(0);
   const [partnerName, setPartnerName] = useState(
@@ -70,7 +76,7 @@ export function OnboardingWizard() {
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (saving || !user) return;
+    if (saving || !user || !workspaceUid) return;
 
     // Validasi semua langkah sebelum menyimpan.
     setErrors({
@@ -86,13 +92,13 @@ export function OnboardingWizard() {
     setSaveError(null);
     try {
       // FR-03: data onboarding tersimpan di users/{userId}.
-      await saveUserProfile(user.uid, {
+      await saveUserProfile(workspaceUid, {
         partnerName: partnerName.trim(),
         weddingDate,
         venue: venue.trim(),
       });
       // FR-02: auto-generate checklist default 9 kategori (FR-08).
-      await generateDefaultChecklist(user.uid, weddingDate);
+      await generateDefaultChecklist(workspaceUid, weddingDate);
       router.replace("/dashboard");
     } catch {
       setSaveError(

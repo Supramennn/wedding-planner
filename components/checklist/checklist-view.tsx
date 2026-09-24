@@ -59,9 +59,9 @@ function groupByCategory(items: ChecklistItem[]) {
 
 /** Modul Checklist Persiapan (FR-08 s/d FR-11). */
 export function ChecklistView() {
-  const { user } = useAuth();
+  const { workspaceUid } = useAuth();
   const { items, loading, error } = useCollection<ChecklistItem>(
-    user ? checklistPath(user.uid) : null,
+    workspaceUid ? checklistPath(workspaceUid) : null,
     { orderBy: { field: "createdAt" } }
   );
 
@@ -187,9 +187,9 @@ export function ChecklistView() {
                         checked={item.isCompleted}
                         disabled={busyId === item.id}
                         onChange={() =>
-                          user &&
+                          workspaceUid &&
                           runAction(item.id, () =>
-                            toggleChecklistItem(user.uid, item)
+                            toggleChecklistItem(workspaceUid, item)
                           )
                         }
                         aria-label={`Tandai selesai: ${item.title}`}
@@ -258,10 +258,10 @@ export function ChecklistView() {
         onClose={() => setFormTarget(null)}
         title={formTarget?.mode === "edit" ? "Ubah tugas" : "Tambah tugas"}
       >
-        {formTarget && user && (
+        {formTarget && workspaceUid && (
           <ChecklistForm
             key={formTarget.item?.id ?? "new"}
-            uid={user.uid}
+            uid={workspaceUid}
             mode={formTarget.mode}
             item={formTarget.item}
             onClose={() => setFormTarget(null)}
@@ -291,10 +291,10 @@ export function ChecklistView() {
             size="lg"
             loading={busyId === pendingDelete?.id}
             onClick={() =>
-              user &&
+              workspaceUid &&
               pendingDelete &&
               runAction(pendingDelete.id, async () => {
-                await deleteChecklistItem(user.uid, pendingDelete.id);
+                await deleteChecklistItem(workspaceUid, pendingDelete.id);
                 setPendingDelete(null);
               })
             }

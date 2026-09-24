@@ -15,14 +15,14 @@ import type { UserProfile } from "@/types";
  * snapshot profil tiba — tanpa setState di dalam effect).
  */
 export function ProfileForm() {
-  const { user, profile, loading, profileLoading } = useAuth();
+  const { workspaceUid, profile, loading, profileLoading } = useAuth();
 
-  if (loading || profileLoading || !user) {
+  if (loading || profileLoading || !workspaceUid) {
     return <CardSkeleton lines={5} />;
   }
 
   return (
-    <ProfileFormInner key={user.uid} uid={user.uid} defaults={profile} />
+    <ProfileFormInner key={workspaceUid} uid={workspaceUid} defaults={profile} />
   );
 }
 
