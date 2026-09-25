@@ -500,6 +500,30 @@ await expectAllowed(
   setDoc(doc(db, "users", uidA), { totalBudget: 250_000_000 }, { merge: true })
 );
 
+// Koleksi baru (fitur tamu & item persiapan) juga mengikuti aturan workspace.
+const guestByB = doc(collection(db, "users", uidA, "guests"));
+await expectAllowed(
+  "B menambah tamu ke daftar tamu A (collection baru)",
+  setDoc(guestByB, {
+    name: "Tamu dari Pasangan",
+    group: "Teman Pria",
+    status: "draft",
+    notes: "",
+    createdAt: stamp + 100,
+  })
+);
+const prepByB = doc(collection(db, "users", uidA, "prepItems"));
+await expectAllowed(
+  "B menambah item persiapan budget di workspace A",
+  setDoc(prepByB, {
+    name: "Souvenir 200 pcs",
+    categoryName: "Lain-lain",
+    plannedAmount: 2_000_000,
+    isDone: false,
+    createdAt: stamp + 100,
+  })
+);
+
 // --- 8. Storage: B upload struk ke folder A -------------------------------
 const receiptByB = `users/${uidA}/receipts/couple-test-b.jpg`;
 await expectAllowed(
@@ -530,6 +554,20 @@ await expectDenied(
 await expectDenied(
   "C membaca checklist A",
   getDocs(collection(db, "users", uidA, "checklist"))
+);
+await expectDenied(
+  "C membaca daftar tamu A",
+  getDocs(collection(db, "users", uidA, "guests"))
+);
+await expectDenied(
+  "C menulis item persiapan di workspace A",
+  addDoc(collection(db, "users", uidA, "prepItems"), {
+    name: "Nyasar",
+    categoryName: "Lain-lain",
+    plannedAmount: 0,
+    isDone: false,
+    createdAt: stamp,
+  })
 );
 await expectDenied(
   "C mengubah profil A",
@@ -626,6 +664,8 @@ try {
     listSnapshot.docs.map((entry) => deleteDoc(entry.ref).catch(() => {}))
   );
   await deleteDoc(bNewItem).catch(() => {});
+  await deleteDoc(guestByB).catch(() => {});
+  await deleteDoc(prepByB).catch(() => {});
   await deleteDoc(doc(db, "users", uidA, "budget", "katering")).catch(() => {});
   await deleteDoc(doc(db, "users", uidA, "budget", "dekorasi")).catch(() => {});
   await deleteDoc(doc(db, "users", uidA)).catch(() => {});

@@ -28,8 +28,10 @@ WedPlan membantu calon pengantin mengelola **checklist, budget, dan vendor** per
 | Onboarding | FR-02, FR-03 | Wizard 3 langkah (nama pasangan → tanggal → lokasi) → auto-generate **19 tugas checklist default**; data bisa diedit ulang di **Pengaturan** |
 | Dashboard | FR-04…07 | Countdown hari-H, % checklist, budget terpakai vs alokasi (indikator warna), jumlah vendor per status |
 | Checklist | FR-08…11 | 9 kategori default; CRUD item (judul/kategori/due date opsional/status); progress per kategori & total; **realtime** (tanpa tombol "save") |
-| Budget | FR-12…16 | Total budget (edit kapan saja); alokasi per kategori via **nominal atau persentase**; pengeluaran + **foto struk → Firebase Storage**; chart Recharts **alokasi vs realisasi**; warna hijau <70% / kuning 70–99% / merah ≥100% |
+| Budget | FR-12…16 | Total budget (edit kapan saja); alokasi per kategori via **nominal atau persentase**; pengeluaran + **foto struk → Firebase Storage**; chart Recharts **alokasi vs realisasi**; warna hijau <70% / kuning 70–99% / merah ≥100%; daftar **item yang perlu disiapkan** (estimasi biaya, centang saat siap) |
 | Vendor | FR-17…19 | Field lengkap + alur status Dihubungi→Nego→Deal→DP→Lunas; **dua mode tampilan**: list (sortable) & timeline (urut deadline); badge **H-7 / H-3 / H-1** + "Terlambat"/"Hari ini" |
+| **Tamu Undangan** | — | Menu **Tamu**: CRUD tamu (nama, kelompok, status, catatan) → **estimasi jumlah otomatis**: total, estimasi hadir, menunggu jawaban, belum dikirim, tidak hadir + rincian per kelompok undangan (realtime) |
+| **Lamaran (Engagement)** | — | Menu **Lamaran**: checklist persiapan lamaran **terpisah** dari nikah — kategori sendiri (Cincin & Mahar, Keluarga & Adat, …), progress & template 11 tugas sekali klik |
 | PWA | FR-20…23 | Manifest lengkap (standalone, ikon 192/512/maskable), service worker + halaman `/offline`, responsive mobile-first |
 | **Kolaborasi pasangan** *(Phase 2)* | — | **2 akun → 1 data pernikahan**: undang via email → tautan otomatis (auto-claim); bila kedua akun sudah punya data → tombol **gabungkan (merge)** dengan dedup; seluruh modul realtime dua arah; lepas tautan kapan saja |
 | **Pengingat push** *(Phase 2)* | — | **FCM**: notifikasi H-7/H-3/H-1/H-0 jatuh tempo pembayaran vendor & tenggat checklist; dikirim cron Vercel (jendela 07.00–21.00 WIB, dedupe harian, token mati di-prune) |
@@ -88,11 +90,11 @@ app/
   offline/page.tsx           # Fallback offline (FR-21)
   (auth)/login, register     # Guard: GuestGuard (sudah login → dashboard/onboarding)
   (setup)/onboarding         # Guard: login saja (FR-02)
-  (app)/dashboard|checklist|budget|vendors|settings   # Guard: login + onboarded
+  (app)/dashboard|checklist|engagement|budget|vendors|guests|settings   # Guard: login + onboarded
 components/
   ui/                        # Kit reusable: button, card, input, select, number-input,
                              # modal, progress-bar, badge, spinner, skeleton, empty-state
-  dashboard|checklist|budget|vendors|onboarding|settings   # Per modul
+  dashboard|checklist|engagement|budget|vendors|guests|onboarding|settings  # Per modul
   layout/app-shell.tsx       # Header + nav (daftar menu: NAV_ITEMS)
   providers/app-providers.tsx# MotionConfig reducedMotion + AuthProvider + SwRegister
 lib/
@@ -100,8 +102,10 @@ lib/
   constants.ts               # SINGLE SOURCE: kategori, status vendor, ambang warna
   aggregate.ts               # Statistik checklist/budget/vendor (dipakai dashboard & modul)
   collection-paths.ts        # Path Firestore (string) — satu tempat
-  default-checklist.ts       # Template 19 tugas default (FR-02/FR-08)
+  default-checklist.ts       # Template 19 tugas default (FR-02/FR-08) + 11 tugas lamaran
   couple-service.ts          # Kolaborasi pasangan: cari/klaim/batal undangan, unlink
+  guest-service.ts           # CRUD daftar tamu undangan (estimasi jumlah)
+  prep-service.ts            # CRUD item "yang perlu disiapkan" (modul budget)
   push/client.ts             # Klien FCM: izin notifikasi + simpan/hapus token
   *-service.ts               # Tulis-baca Firestore/Storage per modul
   hooks/                     # auth-context (resolusi workspace + auto-claim), auth-guard,
@@ -130,12 +134,19 @@ users/{userId}
 
 users/{userId}/checklist/{itemId}
   - title, category, dueDate, isCompleted, createdAt
+  - phase*                   (*absen = nikah; "engagement" = lamaran — koleksi dipakai bersama)
 
 users/{userId}/budget/{categoryId}
   - categoryName, allocatedAmount, expenses: [{ description, amount, date, receiptUrl }]
 
 users/{userId}/vendors/{vendorId}
   - name, category, contact, status, dealAmount, paymentDeadline, notes, createdAt
+
+users/{userId}/guests/{guestId}        (daftar tamu undangan — fitur estimasi)
+  - name, group, status, notes, createdAt
+
+users/{userId}/prepItems/{itemId}      (item yang perlu disiapkan — modul budget)
+  - name, categoryName, plannedAmount, isDone, createdAt
 
 users/{userId}/reminderLog/{logId}      (tulis HANYA Admin SDK server; client DENY)
   - createdAt, successCount, title      (dedupe pengingat push per item+tanggal)
@@ -150,6 +161,8 @@ users/{userId}/reminderLog/{logId}      (tulis HANYA Admin SDK server; client DE
 - **Kolaborasi (Phase 2):** data pernikahan tetap di bawah `users/{pemilik}`; pasangan menautkan akunnya lewat `linkedTo` di dokumennya sendiri. `workspaceUid = linkedTo ?? uid sendiri` (lihat `auth-context.tsx`) — semua modul membaca path dari `workspaceUid`, sehingga dua akun realtime pada dataset yang sama. Field couple bersifat **additive** (dokumen lama tanpa field ini tetap sah — rules menanganinya).
 - **Merge dua data (Phase 2):** bila kedua akun sudah onboarding, tautan lewat tombol di kartu Pengaturan — **klaim dulu, baru salin**: profil mengisi kekosongan (workspace menang), checklist/vendor dedup (judul+kategori / nama+kategori), budget per-slug (alokasi workspace dipertahankan, expenses menyatu), struk disalin best-effort ke folder workspace, penanda `mergedFromUid` ditulis **terakhir** (retry aman, tidak menggandakan).
 - **Push (Phase 2):** `fcmTokens` ada di dokumen SETIAP akun; cron mengumpulkan token workspace + `partnerUid` → unlink otomatis memutus kiriman ke mantan pasangan.
+- **Lamaran terpisah dari nikah:** item checklist keduanya berada di koleksi **sama** (`checklist`), dibedakan field additive `phase: "engagement"` (data lama tanpa field = nikah) → tanpa migrasi, rules & realtime tetap yang sudah teruji. Menu Checklist menyaring `phase !== "engagement"`, menu Lamaran sebaliknya. Kategori lamaran (`ENGAGEMENT_CATEGORIES`) terpisah dari kategori nikah.
+- **Daftar tamu & item persiapan:** dua subcollection baru `guests` dan `prepItems` di bawah workspace — ikut aturan `hasWorkspaceAccess` yang sama (pasangan tertaut ikut mengisi). Estimasi hadir = status Hadir + Terkirim (belum menjawab); item persiapan membawa `plannedAmount` sehingga total rencana bisa dibandingkan dengan alokasi budget.
 
 ## 6. Keamanan (Security Rules) & Uji Isolasi
 
@@ -174,7 +187,7 @@ npx firebase-tools emulators:exec --only auth,firestore,storage \
   --project demo-wedplan "node scripts/test-rules-isolation.mjs --emulator && node scripts/test-couple-rules.mjs --emulator"
 ```
 
-Skrip **`test-couple-rules.mjs`** (Phase 2) menambah **41 skenario** kolaborasi & merge: temukan undangan via query email sendiri → klaim dua langkah → **simulasi merge** (isi kekosongan profil, salin checklist dengan dedup — 2 dari 3 item, gabung budget per-slug, penanda idempoten) → pasangan membaca/menulis checklist, budget & profil workspace, upload struk ke folder pasangan (semua `PASS`); arah storage `linkedTo` (pemilik membaca struk lama pasangan `PASS`, gugur setelah unlink); pihak ketiga C ditolak total termasuk upaya klaim; setelah unlink oleh pemilik, akses pasangan gugur kembali sementara data miliknya sendiri tetap terbaca.
+Skrip **`test-couple-rules.mjs`** (Phase 2) menambah **45 skenario** kolaborasi & merge: temukan undangan via query email sendiri → klaim dua langkah → **simulasi merge** (isi kekosongan profil, salin checklist dengan dedup — 2 dari 3 item, gabung budget per-slug, penanda idempoten) → pasangan membaca/menulis checklist, budget, profil, **daftar tamu & item persiapan** workspace, upload struk ke folder pasangan (semua `PASS`); arah storage `linkedTo` (pemilik membaca struk lama pasangan `PASS`, gugur setelah unlink); pihak ketiga C ditolak total termasuk upaya klaim **dan akses koleksi baru**; setelah unlink oleh pemilik, akses pasangan gugur kembali sementara data miliknya sendiri tetap terbaca. Total kedua skrip: **54 skenario**.
 
 **Jalur B — proyek asli (setelah rules di-deploy):**
 
@@ -255,6 +268,9 @@ Skrip menguji 10+ skenario: A akses data sendiri (wajib lolos), akses tanpa logi
   - [ ] Checklist: tambah/ubah/hapus/toggle → langsung tersimpan (buka tab kedua → sinkron realtime); progress per kategori & total benar.
   - [ ] Budget: set total → alokasi % dan Rp → catat pengeluaran + struk → chart & warna sesuai ambang; sisa budget benar.
   - [ ] Vendor: 2 mode tampilan; deadline 7/3/1 hari ke depan menampilkan badge H-7/H-3/H-1; status berpindah tahap.
+  - [ ] Tamu: tambah tamu → angka estimasi (total/hadir/menunggu/belum dikirim) & rincian per kelompok ikut berubah realtime; pasangan di akun kedua melihat data yang sama.
+  - [ ] Lamaran: menu **Lamaran** terpisah dari **Checklist** (tugas lamaran tidak muncul di checklist nikah dan sebaliknya); "Muat template persiapan" membuat 11 tugas (tidak menggandakan saat diklik ulang).
+  - [ ] Budget → item persiapan: tambah item + estimasi biaya → total rencana/belum/sudah disiapkan terhitung; centang menandai selesai; ringkasan tidak bocor ke menu lain.
 - [ ] **Rules isolation PASS** (jalur A/B/manual di [bagian 6](#6-keamanan-security-rules--uji-isolasi)).
 - [ ] **Kolaborasi pasangan**: undang dari Pengaturan → pasangan daftar dengan email itu → keduanya masuk dashboard yang sama; edit checklist di A muncul realtime di B; C (akun ketiga) tetap ditolak; unlink memutus akses B; kedua akun sudah terisi data → tombol **"Gabungkan data & tautkan"** menggabung checklist/budget/vendor tanpa duplikat.
 - [ ] **Push reminder**: Pengaturan → "Aktifkan pengingat" (izin diberikan, status Diizinkan) → cron terjadwal; uji `curl` endpoint cron dengan `CRON_SECRET` mengembalikan JSON `ok:true`; notifikasi masuk di HP saat item deadline H-1/H-0; klik notifikasi membuka rute terkait.

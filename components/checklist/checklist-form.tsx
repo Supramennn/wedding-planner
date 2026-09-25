@@ -3,7 +3,7 @@
 import { useState, type FormEvent } from "react";
 import { CHECKLIST_CATEGORIES } from "@/lib/constants";
 import { addChecklistItem, updateChecklistItem } from "@/lib/checklist-service";
-import type { ChecklistCategory, ChecklistItem } from "@/types";
+import type { ChecklistItem } from "@/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
@@ -13,21 +13,30 @@ import { Select } from "@/components/ui/select";
  * Disimpan langsung ke Firestore (FR-11: tanpa tombol save terpisah —
  * tombol di sini adalah "kirim ke Firestore", hasilnya realtime).
  * Komponen di-mount ulang tiap modal dibuka (key) sehingga state selalu segar.
+ *
+ * Dipakai dua tahap: checklist nikah (default) & checklist engagement
+ * (props `categories` = kategori lamaran, `phase` = "engagement" saat tambah).
  */
 export function ChecklistForm({
   uid,
   mode,
   item,
   onClose,
+  categories = CHECKLIST_CATEGORIES,
+  phase,
 }: {
   uid: string;
   mode: "add" | "edit";
   item: ChecklistItem | null;
   onClose: () => void;
+  /** Daftar kategori untuk select (default: kategori persiapan nikah). */
+  categories?: readonly string[];
+  /** Ditulis saat TAMBAH bila terisi — memisahkan tahap lamaran vs nikah. */
+  phase?: "engagement";
 }) {
   const [title, setTitle] = useState(() => item?.title ?? "");
   const [category, setCategory] = useState<string>(
-    () => item?.category ?? CHECKLIST_CATEGORIES[0]
+    () => item?.category ?? categories[0] ?? CHECKLIST_CATEGORIES[0]
   );
   const [dueDate, setDueDate] = useState(() => item?.dueDate ?? "");
   const [titleError, setTitleError] = useState<string | null>(null);
@@ -48,11 +57,11 @@ export function ChecklistForm({
     try {
       const input = {
         title: title.trim(),
-        category: category as ChecklistCategory,
+        category: category as ChecklistItem["category"],
         dueDate,
       };
       if (mode === "add") {
-        await addChecklistItem(uid, input);
+        await addChecklistItem(uid, { ...input, phase });
       } else if (item) {
         await updateChecklistItem(uid, item.id, input);
       }
@@ -86,7 +95,7 @@ export function ChecklistForm({
 
       <Select
         label="Kategori"
-        options={CHECKLIST_CATEGORIES.map((value) => ({ value, label: value }))}
+        options={categories.map((value) => ({ value, label: value }))}
         value={category}
         onValueChange={setCategory}
       />

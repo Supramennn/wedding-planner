@@ -21,3 +21,13 @@ export function budgetPath(uid: string): string {
 export function vendorsPath(uid: string): string {
   return `users/${uid}/vendors`;
 }
+
+/** Daftar tamu undangan (estimasi jumlah tamu). */
+export function guestsPath(uid: string): string {
+  return `users/${uid}/guests`;
+}
+
+/** Item persiapan/pengeluaran (daftar yang perlu disiapkan — modul budget). */
+export function prepPath(uid: string): string {
+  return `users/${uid}/prepItems`;
+}

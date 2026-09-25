@@ -23,6 +23,7 @@ import { CardSkeleton } from "@/components/ui/skeleton";
 import { AllocationForm } from "@/components/budget/allocation-form";
 import { BudgetChart } from "@/components/budget/budget-chart";
 import { ExpenseForm } from "@/components/budget/expense-form";
+import { PrepList } from "@/components/budget/prep-list";
 import { TotalBudgetForm } from "@/components/budget/total-budget-form";
 
 type AllocationTarget = { categoryName: string; current: number };
@@ -97,6 +98,12 @@ export function BudgetView() {
       };
     });
   }, [categories]);
+
+  /** Nama kategori untuk form item persiapan — sama dengan daftar alokasi. */
+  const categoryNames = useMemo(
+    () => allocationRows.map((row) => row.name),
+    [allocationRows]
+  );
 
   /** Daftar pengeluaran lintas kategori, terbaru di atas. */
   const expenseRows = useMemo(
@@ -350,6 +357,9 @@ export function BudgetView() {
           ))}
         </ul>
       </Card>
+
+      {/* Item yang perlu disiapkan (daftar belanja + estimasi biaya) */}
+      <PrepList categoryNames={categoryNames} />
 
       {/* FR-14: daftar pengeluaran */}
       <Card>

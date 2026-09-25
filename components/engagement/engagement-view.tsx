@@ -4,16 +4,14 @@ import { useMemo, useState } from "react";
 import { useAuth } from "@/lib/hooks/auth-context";
 import { useCollection } from "@/lib/hooks/use-collection";
 import { checklistPath } from "@/lib/collection-paths";
-import {
-  checklistStats,
-  groupChecklistByCategory,
-} from "@/lib/aggregate";
-import { CHECKLIST_CATEGORIES } from "@/lib/constants";
+import { checklistStats, groupChecklistByCategory } from "@/lib/aggregate";
+import { ENGAGEMENT_CATEGORIES } from "@/lib/constants";
 import { daysUntil, formatDateID } from "@/lib/format";
 import {
   deleteChecklistItem,
   toggleChecklistItem,
 } from "@/lib/checklist-service";
+import { generateEngagementChecklist } from "@/lib/default-checklist";
 import type { ChecklistItem } from "@/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -24,13 +22,19 @@ import { ProgressBar } from "@/components/ui/progress-bar";
 import { CardSkeleton } from "@/components/ui/skeleton";
 import { ChecklistForm } from "@/components/checklist/checklist-form";
 
-type FormTarget = { mode: "add"; item: null } | { mode: "edit"; item: ChecklistItem };
+type FormTarget =
+  | { mode: "add"; item: null }
+  | { mode: "edit"; item: ChecklistItem };
 
 const ACTION_ERROR =
   "Gagal menyimpan perubahan. Periksa koneksi internet Anda.";
 
-/** Modul Checklist Persiapan nikah (FR-08 s/d FR-11). */
-export function ChecklistView() {
+/**
+ * Modul Persiapan Lamaran (Engagement) — TERPISAH dari persiapan nikah.
+ * Item disimpan di koleksi checklist yang sama dengan `phase: "engagement"`
+ * (schema additive, tanpa migrasi), diurutkan dengan kategori lamaran.
+ */
+export function EngagementView() {
   const { workspaceUid } = useAuth();
   const { items, loading, error } = useCollection<ChecklistItem>(
     workspaceUid ? checklistPath(workspaceUid) : null,
@@ -42,18 +46,18 @@ export function ChecklistView() {
     null
   );
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [seeding, setSeeding] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
 
-  // Pisahkan tahap: item engagement tampil di menu "Lamaran", bukan di sini.
-  const weddingItems = useMemo(
-    () => items.filter((item) => item.phase !== "engagement"),
+  const engagementItems = useMemo(
+    () => items.filter((item) => item.phase === "engagement"),
     [items]
   );
   const groups = useMemo(
-    () => groupChecklistByCategory(weddingItems, CHECKLIST_CATEGORIES),
-    [weddingItems]
+    () => groupChecklistByCategory(engagementItems, ENGAGEMENT_CATEGORIES),
+    [engagementItems]
   );
-  const stats = checklistStats(weddingItems);
+  const stats = checklistStats(engagementItems);
 
   async function runAction(id: string | null, action: () => Promise<void>) {
     setActionError(null);
@@ -64,6 +68,20 @@ export function ChecklistView() {
       setActionError(ACTION_ERROR);
     } finally {
       setBusyId(null);
+    }
+  }
+
+  /** Muat 11 tugas template lamaran (idempoten — tidak menggandakan). */
+  async function handleSeed() {
+    if (!workspaceUid || seeding) return;
+    setActionError(null);
+    setSeeding(true);
+    try {
+      await generateEngagementChecklist(workspaceUid);
+    } catch {
+      setActionError(ACTION_ERROR);
+    } finally {
+      setSeeding(false);
     }
   }
 
@@ -91,13 +109,17 @@ export function ChecklistView() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-semibold text-neutral-900">
-            Checklist Persiapan
+            Persiapan Lamaran
           </h1>
           <p className="text-sm text-neutral-500">
-            {stats.completed} dari {stats.total} tugas selesai
+            Rencana lamaran terpisah dari persiapan nikah — {stats.completed}{" "}
+            dari {stats.total} tugas selesai
           </p>
         </div>
-        <Button size="md" onClick={() => setFormTarget({ mode: "add", item: null })}>
+        <Button
+          size="md"
+          onClick={() => setFormTarget({ mode: "add", item: null })}
+        >
           + Tambah tugas
         </Button>
       </div>
@@ -111,22 +133,26 @@ export function ChecklistView() {
         </div>
       )}
 
-      {/* FR-10: progress total keseluruhan */}
       <Card>
-        <ProgressBar
-          value={stats.percent}
-          label="Progress keseluruhan"
-        />
+        <ProgressBar value={stats.percent} label="Progress lamaran" />
       </Card>
 
-      {weddingItems.length === 0 ? (
+      {engagementItems.length === 0 ? (
         <EmptyState
-          title="Checklist masih kosong"
-          description="Onboarding akan mengisi checklist default. Kamu juga bisa menambah tugas sendiri."
+          title="Belum ada persiapan lamaran"
+          description="Muat template (11 tugas umum: cincin, seserahan, keluarga, acara, dokumentasi) atau tambah tugas sendiri."
           action={
-            <Button onClick={() => setFormTarget({ mode: "add", item: null })}>
-              Tambah tugas pertama
-            </Button>
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <Button loading={seeding} onClick={handleSeed}>
+                Muat template persiapan
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => setFormTarget({ mode: "add", item: null })}
+              >
+                Tambah tugas sendiri
+              </Button>
+            </div>
           }
         />
       ) : (
@@ -143,7 +169,6 @@ export function ChecklistView() {
                 </span>
               </div>
 
-              {/* FR-10: progress per kategori */}
               <ProgressBar
                 className="mt-2"
                 value={groupStats.percent}
@@ -158,10 +183,7 @@ export function ChecklistView() {
                     (daysUntil(item.dueDate) as number) < 0;
 
                   return (
-                    <li
-                      key={item.id}
-                      className="flex items-start gap-3 py-3"
-                    >
+                    <li key={item.id} className="flex items-start gap-3 py-3">
                       <input
                         type="checkbox"
                         checked={item.isCompleted}
@@ -187,7 +209,7 @@ export function ChecklistView() {
                           {item.title}
                         </p>
                         <div className="mt-1 flex flex-wrap items-center gap-2 text-xs">
-                          <Badge tone="rose">{item.category}</Badge>
+                          <Badge tone="violet">{item.category}</Badge>
                           {item.dueDate && (
                             <span
                               className={
@@ -236,7 +258,9 @@ export function ChecklistView() {
       <Modal
         open={formTarget !== null}
         onClose={() => setFormTarget(null)}
-        title={formTarget?.mode === "edit" ? "Ubah tugas" : "Tambah tugas"}
+        title={
+          formTarget?.mode === "edit" ? "Ubah tugas lamaran" : "Tambah tugas lamaran"
+        }
       >
         {formTarget && workspaceUid && (
           <ChecklistForm
@@ -244,6 +268,8 @@ export function ChecklistView() {
             uid={workspaceUid}
             mode={formTarget.mode}
             item={formTarget.item}
+            categories={ENGAGEMENT_CATEGORIES}
+            phase="engagement"
             onClose={() => setFormTarget(null)}
           />
         )}
@@ -263,7 +289,11 @@ export function ChecklistView() {
           akan dihapus permanen.
         </p>
         <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-          <Button variant="outline" size="lg" onClick={() => setPendingDelete(null)}>
+          <Button
+            variant="outline"
+            size="lg"
+            onClick={() => setPendingDelete(null)}
+          >
             Batal
           </Button>
           <Button

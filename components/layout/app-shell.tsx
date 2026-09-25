@@ -16,8 +16,10 @@ import { Button } from "@/components/ui/button";
 const NAV_ITEMS = [
   { href: "/dashboard", label: "Dasbor" },
   { href: "/checklist", label: "Checklist" },
+  { href: "/engagement", label: "Lamaran" },
   { href: "/budget", label: "Budget" },
   { href: "/vendors", label: "Vendor" },
+  { href: "/guests", label: "Tamu" },
   { href: "/settings", label: "Pengaturan" },
 ] as const;
 
@@ -38,6 +40,13 @@ const NAV_ICONS: Record<string, ReactNode> = {
       <path d="m3.2 17.4 1.4 1.4 2.6-3" />
     </>
   ),
+  "/engagement": (
+    <>
+      <circle cx="11" cy="15" r="5" />
+      <path d="M11 5.6l2.3 2.9-2.3 2.9-2.3-2.9z" />
+      <path d="M16.8 11.6 21 8.2" />
+    </>
+  ),
   "/budget": (
     <>
       <rect x="3" y="6.5" width="18" height="12.5" rx="2.5" />
@@ -50,6 +59,14 @@ const NAV_ICONS: Record<string, ReactNode> = {
       <path d="M4.5 9.5h15V20h-15z" />
       <path d="M5 9.5 6.5 4h11l1.5 5.5" />
       <path d="M9.5 20v-5h5v5" />
+    </>
+  ),
+  "/guests": (
+    <>
+      <circle cx="9" cy="8.2" r="3.2" />
+      <path d="M3.5 19.6c0-3 2.4-5.2 5.5-5.2s5.5 2.2 5.5 5.2" />
+      <path d="M16.2 5.6a3 3 0 0 1 0 5.4" />
+      <path d="M17.6 14.7c1.8.8 2.9 2.6 2.9 4.9" />
     </>
   ),
   "/settings": (

@@ -87,6 +87,16 @@ service cloud.firestore {
         allow read, write: if hasWorkspaceAccess(userId);
       }
 
+      // Daftar tamu undangan (estimasi jumlah tamu per status & kelompok)
+      match /guests/{guestId} {
+        allow read, write: if hasWorkspaceAccess(userId);
+      }
+
+      // Item yang perlu disiapkan (daftar belanja — modul budget)
+      match /prepItems/{itemId} {
+        allow read, write: if hasWorkspaceAccess(userId);
+      }
+
       // Log pengiriman reminder (hanya Admin SDK server; client DENY).
       match /reminderLog/{logId} {
         allow read, write: if false;

@@ -4,9 +4,11 @@ import {
   getDocs,
   limit,
   query,
+  where,
   writeBatch,
 } from "firebase/firestore";
 import { getDb } from "@/lib/firebase";
+import { ENGAGEMENT_CATEGORIES } from "@/lib/constants";
 import type { ChecklistCategory } from "@/types";
 
 /**
@@ -64,6 +66,28 @@ function dueDateBefore(weddingDate: string, days: number): string {
 }
 
 /**
+ * Template checklist ENGAGEMENT (persiapan lamaran) — terpisah dari
+ * persiapan nikah (menu "Lamaran"). Tidak ada tanggal acara lamaran di
+ * profil, jadi due date dikosongkan dan boleh diisi manual oleh user.
+ */
+export const ENGAGEMENT_CHECKLIST_TEMPLATES: {
+  title: string;
+  category: (typeof ENGAGEMENT_CATEGORIES)[number];
+}[] = [
+  { title: "Tentukan tanggal pelaksanaan lamaran", category: "Keluarga & Adat" },
+  { title: "Sepakati waktu dengan keluarga besar kedua pihak", category: "Keluarga & Adat" },
+  { title: "Pilih dan pesan cincin lamaran", category: "Cincin & Mahar" },
+  { title: "Siapkan mahar dan seserahan", category: "Cincin & Mahar" },
+  { title: "Tentukan konsep acara (adat/modern/kekeluargaan)", category: "Acara & Venue" },
+  { title: "Pilih tempat pelaksanaan (rumah/venue/restoran)", category: "Acara & Venue" },
+  { title: "Susun acara dan koordinasi MC", category: "Acara & Venue" },
+  { title: "Buat daftar tamu undangan lamaran", category: "Acara & Venue" },
+  { title: "Pilih dokumentasi foto/video lamaran", category: "Dokumentasi" },
+  { title: "Siapkan busana dan rias untuk hari lamaran", category: "Busana & Penampilan" },
+  { title: "Kirim undangan ke keluarga dan sahabat", category: "Lain-lain" },
+];
+
+/**
  * Generate checklist default. Aman dipanggil berulang: bila koleksi sudah
  * berisi item, tidak ada apa-apa yang dilakukan (tidak ada duplikasi).
  *
@@ -97,4 +121,44 @@ export async function generateDefaultChecklist(
 
   await batch.commit();
   return DEFAULT_CHECKLIST_TEMPLATES.length;
+}
+
+/**
+ * Generate checklist engagement (persiapan lamaran). Idempoten: bila sudah
+ * ada item ber-`phase: "engagement"`, tidak ada apa-apa yang dilakukan.
+ * (Pengecekan harus spesifik phase engagement — koleksinya BERSAMA
+ * checklist nikah, jadi limit(1) tanpa filter akan salah.)
+ *
+ * @returns jumlah item yang dibuat (0 bila sudah pernah generate).
+ */
+export async function generateEngagementChecklist(uid: string): Promise<number> {
+  const db = getDb();
+  const checklistCollection = collection(db, "users", uid, "checklist");
+
+  const existing = await getDocs(
+    query(
+      checklistCollection,
+      where("phase", "==", "engagement"),
+      limit(1)
+    )
+  );
+  if (!existing.empty) return 0;
+
+  const batch = writeBatch(db);
+  const createdAt = Date.now();
+
+  for (const template of ENGAGEMENT_CHECKLIST_TEMPLATES) {
+    const itemRef = doc(checklistCollection);
+    batch.set(itemRef, {
+      title: template.title,
+      category: template.category,
+      dueDate: "",
+      isCompleted: false,
+      phase: "engagement",
+      createdAt,
+    });
+  }
+
+  await batch.commit();
+  return ENGAGEMENT_CHECKLIST_TEMPLATES.length;
 }

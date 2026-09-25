@@ -7,7 +7,7 @@ import {
 } from "firebase/firestore";
 import { getDb } from "@/lib/firebase";
 import { checklistPath } from "@/lib/collection-paths";
-import type { ChecklistCategory, ChecklistItem } from "@/types";
+import type { ChecklistItem } from "@/types";
 
 /**
  * Tulis-baca modul checklist (FR-09, FR-11).
@@ -17,9 +17,14 @@ import type { ChecklistCategory, ChecklistItem } from "@/types";
 
 export interface ChecklistInput {
   title: string;
-  category: ChecklistCategory;
+  category: ChecklistItem["category"];
   /** "" = tanpa due date (opsional) */
   dueDate: string;
+  /**
+   * Tahap: absen = persiapan nikah (default), "engagement" = persiapan
+   * lamaran. Ditulis hanya bila terisi (data lama tetap tanpa field ini).
+   */
+  phase?: "engagement";
 }
 
 export async function addChecklistItem(
@@ -32,6 +37,7 @@ export async function addChecklistItem(
     dueDate: input.dueDate,
     isCompleted: false,
     createdAt: Date.now(),
+    ...(input.phase ? { phase: input.phase } : {}),
   });
 }
 
