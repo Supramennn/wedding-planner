@@ -16,6 +16,17 @@ import { NumberInput } from "@/components/ui/number-input";
 import { Select } from "@/components/ui/select";
 
 /**
+ * Peringatan bila upload struk gagal karena infrastruktur (Cloud Storage
+ * belum aktif — kebijakan Google Sep 2024: butuh paket Blaze — atau rules/
+ * jaringan bermasalah). Pengeluaran TETAP disimpan; struk dilewati.
+ */
+const RECEIPT_UNAVAILABLE_WARNING =
+  "Pengeluaran berhasil disimpan, tetapi foto struk tidak bisa diunggah — " +
+  "Cloud Storage belum aktif untuk proyek ini (kebijakan Google: fitur Storage " +
+  "butuh paket Blaze). Setelah Storage diaktifkan, unggah struk langsung " +
+  "berfungsi tanpa perubahan apa pun.";
+
+/**
  * Form catat/edit pengeluaran (FR-14):
  * deskripsi, nominal, tanggal, kategori, foto struk (opsional → Storage).
  */
@@ -54,10 +65,12 @@ export function ExpenseForm({
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [saveWarning, setSaveWarning] = useState<string | null>(null);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (saving) return;
+    // Setelah peringatan struk, form hanya bisa ditutup (hindari duplikat).
+    if (saving || saveWarning) return;
 
     // FR-14: deskripsi, nominal, tanggal wajib; struk opsional.
     const descriptionError = description.trim()
@@ -70,12 +83,28 @@ export function ExpenseForm({
 
     setSaving(true);
     setSaveError(null);
+    let receiptWarning: string | null = null;
     try {
       let receiptUrl = expense?.receiptUrl ?? "";
       if (receiptFile) {
         setUploading(true);
-        receiptUrl = await uploadReceipt(uid, receiptFile);
-        setUploading(false);
+        try {
+          receiptUrl = await uploadReceipt(uid, receiptFile);
+        } catch (uploadError) {
+          // Ukuran/konfigurasi = bisa diperbaiki user → tetap blokir form.
+          if (
+            uploadError instanceof Error &&
+            (uploadError.message.includes("maksimal") ||
+              uploadError.message.includes("konfigurasi"))
+          ) {
+            throw uploadError;
+          }
+          // Gagal infrastruktur (Storage mati/jaringan) → lanjut tanpa struk,
+          // pengeluaran tidak boleh hilang karena struk yang gagal.
+          receiptWarning = RECEIPT_UNAVAILABLE_WARNING;
+        } finally {
+          setUploading(false);
+        }
       }
 
       const data: Expense = {
@@ -90,7 +119,13 @@ export function ExpenseForm({
       } else {
         await updateExpense(uid, initialCategoryName, index ?? -1, data);
       }
-      onClose();
+
+      if (receiptWarning) {
+        // Modal tetap terbuka agar peringatan terbaca; footer jadi "Selesai".
+        setSaveWarning(receiptWarning);
+      } else {
+        onClose();
+      }
     } catch (error) {
       setUploading(false);
       setSaveError(
@@ -112,6 +147,15 @@ export function ExpenseForm({
           className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700"
         >
           {saveError}
+        </div>
+      )}
+
+      {saveWarning && (
+        <div
+          role="status"
+          className="rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800"
+        >
+          {saveWarning}
         </div>
       )}
 
@@ -188,18 +232,27 @@ export function ExpenseForm({
         </p>
       </div>
 
-      <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-        <Button variant="outline" size="lg" onClick={onClose}>
-          Batal
-        </Button>
-        <Button type="submit" size="lg" loading={saving}>
-          {uploading
-            ? "Mengunggah struk…"
-            : mode === "add"
-              ? "Catat pengeluaran"
-              : "Simpan perubahan"}
-        </Button>
-      </div>
+      {saveWarning ? (
+        /* Pengeluaran sudah tersimpan tanpa struk — tutup saja formnya. */
+        <div className="flex justify-end">
+          <Button size="lg" onClick={onClose}>
+            Selesai
+          </Button>
+        </div>
+      ) : (
+        <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+          <Button variant="outline" size="lg" onClick={onClose}>
+            Batal
+          </Button>
+          <Button type="submit" size="lg" loading={saving}>
+            {uploading
+              ? "Mengunggah struk…"
+              : mode === "add"
+                ? "Catat pengeluaran"
+                : "Simpan perubahan"}
+          </Button>
+        </div>
+      )}
     </form>
   );
 }

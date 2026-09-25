@@ -74,7 +74,7 @@ export function BudgetView() {
   const totalBudget = profile?.totalBudget ?? 0;
   const stats = useMemo(() => budgetStats(categories), [categories]);
 
-  /** Baris alokasi: 9 kategori default + kategori lain yang sudah ada datanya. */
+  /** Baris alokasi: 10 kategori default + kategori lain yang sudah ada datanya. */
   const allocationRows = useMemo(() => {
     const byName = new Map(
       categories.map((category) => [category.categoryName, category])

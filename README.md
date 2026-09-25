@@ -27,11 +27,11 @@ WedPlan membantu calon pengantin mengelola **checklist, budget, dan vendor** per
 | Autentikasi | FR-01 | Daftar/masuk Email-PPassword (validasi email & password ≥8 karakter) + Google |
 | Onboarding | FR-02, FR-03 | Wizard 3 langkah (nama pasangan → tanggal → lokasi) → auto-generate **19 tugas checklist default**; data bisa diedit ulang di **Pengaturan** |
 | Dashboard | FR-04…07 | Countdown hari-H, % checklist, budget terpakai vs alokasi (indikator warna), jumlah vendor per status |
-| Checklist | FR-08…11 | 9 kategori default; CRUD item (judul/kategori/due date opsional/status); progress per kategori & total; **realtime** (tanpa tombol "save") |
+| Checklist | FR-08…11 | **10 kategori** (9 PRD + **Cincin Nikah**); CRUD item (judul/kategori/due date opsional/status); progress per kategori & total; **realtime** (tanpa tombol "save") |
 | Budget | FR-12…16 | Total budget (edit kapan saja); alokasi per kategori via **nominal atau persentase**; pengeluaran + **foto struk → Firebase Storage**; chart Recharts **alokasi vs realisasi**; warna hijau <70% / kuning 70–99% / merah ≥100%; daftar **item yang perlu disiapkan** (estimasi biaya, centang saat siap) |
 | Vendor | FR-17…19 | Field lengkap + alur status Dihubungi→Nego→Deal→DP→Lunas; **dua mode tampilan**: list (sortable) & timeline (urut deadline); badge **H-7 / H-3 / H-1** + "Terlambat"/"Hari ini" |
 | **Tamu Undangan** | — | Menu **Tamu**: CRUD tamu (nama, kelompok, status, catatan) → **estimasi jumlah otomatis**: total, estimasi hadir, menunggu jawaban, belum dikirim, tidak hadir + rincian per kelompok undangan (realtime) |
-| **Lamaran (Engagement)** | — | Menu **Lamaran**: checklist persiapan lamaran **terpisah** dari nikah — kategori sendiri (Cincin & Mahar, Keluarga & Adat, …), progress & template 11 tugas sekali klik |
+| **Lamaran (Engagement)** | — | Menu **Lamaran**: checklist persiapan lamaran **terpisah** dari nikah — kategori sendiri (**Cincin Lamaran**, Keluarga & Adat, Acara & Venue, …), progress & template 11 tugas sekali klik |
 | PWA | FR-20…23 | Manifest lengkap (standalone, ikon 192/512/maskable), service worker + halaman `/offline`, responsive mobile-first |
 | **Kolaborasi pasangan** *(Phase 2)* | — | **2 akun → 1 data pernikahan**: undang via email → tautan otomatis (auto-claim); bila kedua akun sudah punya data → tombol **gabungkan (merge)** dengan dedup; seluruh modul realtime dua arah; lepas tautan kapan saja |
 | **Pengingat push** *(Phase 2)* | — | **FCM**: notifikasi H-7/H-3/H-1/H-0 jatuh tempo pembayaran vendor & tenggat checklist; dikirim cron Vercel (jendela 07.00–21.00 WIB, dedupe harian, token mati di-prune) |
@@ -157,7 +157,8 @@ users/{userId}/reminderLog/{logId}      (tulis HANYA Admin SDK server; client DE
 - `totalBudget` (FR-12) — PRD tidak menentukan lokasi penyimpanan total budget, maka disimpan sebagai **field tambahan** di `users/{userId}`, sesuai NFR "struktur siap ditambah field baru tanpa migrasi". `venue`/`weddingDate` dikosongkan lagi = user belum onboarding (dipakai guard `/onboarding`).
 - `categoryId` = **slug determinik** dari nama kategori (mis. `Legal/Dokumen` → `legal-dokumen`) sehingga alokasi selalu upsert, tidak pernah menggandakan dokumen.
 - Item `expenses` diedit berbasis **index** dalam array (skema persis PRD, tanpa id per-transaksi) — aman untuk single-user.
-- **Storage:** struk di `users/{uid}/receipts/{timestamp}-{nama}`, maks **5 MB** (divalidasi di aplikasi *dan* rules).
+- **Storage:** struk di `users/{uid}/receipts/{timestamp}-{nama}`, maks **5 MB** (divalidasi di aplikasi *dan* rules). ⚠️ **Cloud Storage butuh paket Blaze** (kebijakan Google sejak Sep 2024 — Spark plan ditolak 402 dan bucket default tidak bisa dibuat). Selama di Spark, form pengeluaran **tetap menyimpan transaksi tanpa struk** + peringatan amber (tidak gagal); `storage.rules` baru bisa di-deploy setelah bucket ada (Get Started di Console setelah pindah Blaze).
+- **Kategori cincin:** `CHECKLIST_CATEGORIES` memuat **"Cincin Nikah"** (checklist/budget/vendor seragam otomatis — baris alokasi & pilihan kategori ikut muncul), dan `ENGAGEMENT_CATEGORIES` memuat **"Cincin Lamaran"** — persiapan cincin dua acara terpisah rapi.
 - **Kolaborasi (Phase 2):** data pernikahan tetap di bawah `users/{pemilik}`; pasangan menautkan akunnya lewat `linkedTo` di dokumennya sendiri. `workspaceUid = linkedTo ?? uid sendiri` (lihat `auth-context.tsx`) — semua modul membaca path dari `workspaceUid`, sehingga dua akun realtime pada dataset yang sama. Field couple bersifat **additive** (dokumen lama tanpa field ini tetap sah — rules menanganinya).
 - **Merge dua data (Phase 2):** bila kedua akun sudah onboarding, tautan lewat tombol di kartu Pengaturan — **klaim dulu, baru salin**: profil mengisi kekosongan (workspace menang), checklist/vendor dedup (judul+kategori / nama+kategori), budget per-slug (alokasi workspace dipertahankan, expenses menyatu), struk disalin best-effort ke folder workspace, penanda `mergedFromUid` ditulis **terakhir** (retry aman, tidak menggandakan).
 - **Push (Phase 2):** `fcmTokens` ada di dokumen SETIAP akun; cron mengumpulkan token workspace + `partnerUid` → unlink otomatis memutus kiriman ke mantan pasangan.
@@ -177,6 +178,8 @@ npm install -g firebase-tools   # atau pakai npx
 firebase login
 firebase deploy --only firestore:rules,storage
 ```
+
+> Catatan: bagian `storage` hanya bisa di-deploy **setelah bucket Storage dibuat** (Get Started di Firebase Console) — dan sejak Sep 2024 itu butuh **paket Blaze**. Selama di paket Spark, jalankan `firebase deploy --only firestore:rules` saja (tidak ada perubahan storage yang bisa di-deploy).
 
 ### Uji isolasi (syarat DoD — user A tidak bisa akses data user B)
 
@@ -235,7 +238,8 @@ Skrip menguji 10+ skenario: A akses data sendiri (wajib lolos), akses tanpa logi
 
 | Kebutuhan | Lokasi |
 |---|---|
-| Tambah/ubah **kategori** (checklist/budget/vendor seragam) | `lib/constants.ts` → `CHECKLIST_CATEGORIES` (satu sumber, semua modul ikut) |
+| Tambah/ubah **kategori nikah** (checklist/budget/vendor seragam) | `lib/constants.ts` → `CHECKLIST_CATEGORIES` (satu sumber, semua modul ikut) |
+| Tambah/ubah **kategori lamaran** | `lib/constants.ts` → `ENGAGEMENT_CATEGORIES` (khusus menu Lamaran) |
 | Ubah **template checklist default** | `lib/default-checklist.ts` (`title`, `category`, `daysBeforeWedding`) — hanya berlaku untuk onboarding berikutnya; tidak mengubah data user lama (anti-duplikat) |
 | Ambang **warna budget** (FR-16) | `lib/constants.ts` → `BUDGET_THRESHOLDS` (hijau <70%, kuning 70–99%, merah ≥100%) |
 | **Status vendor** & urutan alur | `lib/constants.ts` → `VENDOR_STATUSES`, `VENDOR_STATUS_LABELS`, `VENDOR_STATUS_TONES` |
@@ -253,7 +257,7 @@ Skrip menguji 10+ skenario: A akses data sendiri (wajib lolos), akses tanpa logi
 | Login Google gagal (popup) | Domain belum di *Authorized domains*, atau popup diblokir |
 | Tampilan CSS aneh di dev | Pastikan `npm run dev` (webpack), bukan `next dev` biasa |
 | Halaman offline terus-muncul padahal online | Buka DevTools → Application → Service Workers → *Unregister*, atau bump `VERSION` |
-| Struk gagal diunggah | Ukuran >5 MB, Storage belum aktif, atau `storage.rules` belum di-deploy |
+| Struk gagal diunggah | Ukuran >5 MB, Storage belum aktif, atau `storage.rules` belum di-deploy — **Cloud Storage sejak Sep 2024 wajib paket Blaze** (Spark ditolak 402); selama di Spark pengeluaran **tetap tersimpan tanpa struk** + peringatan otomatis di form, dan struk langsung bisa setelah pindah Blaze → Get Started → `firebase deploy --only storage` |
 | Pengingat push tidak masuk | Env push belum lengkap (VAPID/CRON_SECRET/service account) · belum klik "Aktifkan pengingat" · `permission-denied` di **Vercel → Logs** untuk cron = `CRON_SECRET` beda antara Vercel & kode · `503` = `FIREBASE_SERVICE_ACCOUNT` kosong/tidak valid · di luar jendela 07.00–21.00 WIB memang di-skip |
 | Pasangan tidak bisa akses data | Undangan belum diklaim (pasangan harus daftar/masuk **dengan email yang diundang**) · `firestore.rules`/`storage.rules` terbaru belum di-deploy · kedua akun sudah punya data sendiri → pakai tombol **"Gabungkan data & tautkan"** di kartu Kolaborasi pasangan (Pengaturan) |
 
@@ -266,7 +270,7 @@ Skrip menguji 10+ skenario: A akses data sendiri (wajib lolos), akses tanpa logi
 - [ ] **3 modul tanpa bug kritis**:
   - [ ] Onboarding baru → 19 tugas default muncul; edit data di Pengaturan → countdown dashboard ikut berubah.
   - [ ] Checklist: tambah/ubah/hapus/toggle → langsung tersimpan (buka tab kedua → sinkron realtime); progress per kategori & total benar.
-  - [ ] Budget: set total → alokasi % dan Rp → catat pengeluaran + struk → chart & warna sesuai ambang; sisa budget benar.
+  - [ ] Budget: set total → alokasi % dan Rp → catat pengeluaran + struk → chart & warna sesuai ambang; sisa budget benar. *(struk aktif setelah paket Blaze; di Spark pengeluaran tetap tersimpan tanpa struk + peringatan amber)*
   - [ ] Vendor: 2 mode tampilan; deadline 7/3/1 hari ke depan menampilkan badge H-7/H-3/H-1; status berpindah tahap.
   - [ ] Tamu: tambah tamu → angka estimasi (total/hadir/menunggu/belum dikirim) & rincian per kelompok ikut berubah realtime; pasangan di akun kedua melihat data yang sama.
   - [ ] Lamaran: menu **Lamaran** terpisah dari **Checklist** (tugas lamaran tidak muncul di checklist nikah dan sebaliknya); "Muat template persiapan" membuat 11 tugas (tidak menggandakan saat diklik ulang).

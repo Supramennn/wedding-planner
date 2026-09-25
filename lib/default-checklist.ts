@@ -13,7 +13,8 @@ import type { ChecklistCategory } from "@/types";
 
 /**
  * Checklist default (FR-02 & FR-08) — di-generate otomatis setelah
- * onboarding selesai, mencakup 9 kategori default.
+ * onboarding selesai, mencakup 9 kategori ("Cincin Nikah" tanpa tugas
+ * default — diisi manual sesuai kebutuhan).
  * Due date dihitung mundur dari tanggal pernikahan.
  */
 
@@ -76,8 +77,8 @@ export const ENGAGEMENT_CHECKLIST_TEMPLATES: {
 }[] = [
   { title: "Tentukan tanggal pelaksanaan lamaran", category: "Keluarga & Adat" },
   { title: "Sepakati waktu dengan keluarga besar kedua pihak", category: "Keluarga & Adat" },
-  { title: "Pilih dan pesan cincin lamaran", category: "Cincin & Mahar" },
-  { title: "Siapkan mahar dan seserahan", category: "Cincin & Mahar" },
+  { title: "Pilih dan pesan cincin lamaran", category: "Cincin Lamaran" },
+  { title: "Siapkan mahar dan seserahan", category: "Keluarga & Adat" },
   { title: "Tentukan konsep acara (adat/modern/kekeluargaan)", category: "Acara & Venue" },
   { title: "Pilih tempat pelaksanaan (rumah/venue/restoran)", category: "Acara & Venue" },
   { title: "Susun acara dan koordinasi MC", category: "Acara & Venue" },

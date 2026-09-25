@@ -4,7 +4,7 @@
  * supaya tidak ada duplikasi daftar kategori di banyak tempat.
  */
 
-/** FR-08: kategori default checklist. */
+/** FR-08: kategori default checklist (9 kategori PRD + Cincin Nikah). */
 export const CHECKLIST_CATEGORIES = [
   "Legal/Dokumen",
   "Venue",
@@ -14,6 +14,7 @@ export const CHECKLIST_CATEGORIES = [
   "Dokumentasi",
   "Undangan",
   "Hiburan",
+  "Cincin Nikah",
   "Lain-lain",
 ] as const;
 
@@ -25,7 +26,7 @@ export const VENDOR_CATEGORIES = CHECKLIST_CATEGORIES;
  * persiapan nikah agar kedua rangkaian acara tidak tercampur (menu "Lamaran").
  */
 export const ENGAGEMENT_CATEGORIES = [
-  "Cincin & Mahar",
+  "Cincin Lamaran",
   "Keluarga & Adat",
   "Acara & Venue",
   "Dokumentasi",
