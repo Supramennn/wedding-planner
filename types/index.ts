@@ -99,7 +99,12 @@ export interface Expense {
   amount: number;
   /** ISO date "YYYY-MM-DD" */
   date: string;
-  /** URL struk di Firebase Storage; "" = tidak diunggah (opsional, FR-14). */
+  /**
+   * Id dokumen struk di subcollection `receipts` (gambar terkompres —
+   * pengganti Storage karena kebijakan Blaze). "" / absen = tanpa struk.
+   */
+  receiptId?: string;
+  /** URL struk LEGACY (mis. tautan eksternal); "" = tidak ada. */
   receiptUrl: string;
 }
 

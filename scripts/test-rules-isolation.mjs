@@ -181,6 +181,10 @@ await expectDenied(
   getDoc(doc(db, "users", uidA, "checklist", "any-item"))
 );
 await expectDenied(
+  "B membaca struk milik A (receipts)",
+  getDoc(doc(db, "users", uidA, "receipts", "any-receipt"))
+);
+await expectDenied(
   "B menghapus data milik A",
   deleteDoc(doc(db, "users", uidA, "budget", "any-category"))
 );

@@ -1,7 +1,6 @@
 import { getApps, initializeApp, type FirebaseApp } from "firebase/app";
 import { getAuth, type Auth } from "firebase/auth";
 import { getFirestore, type Firestore } from "firebase/firestore";
-import { getStorage, type FirebaseStorage } from "firebase/storage";
 
 /**
  * Inisialisasi Firebase (client-side) dari environment variables.
@@ -45,8 +44,4 @@ export function getFirebaseAuth(): Auth {
 
 export function getDb(): Firestore {
   return getFirestore(getConfiguredApp());
-}
-
-export function getFirebaseStorage(): FirebaseStorage {
-  return getStorage(getConfiguredApp());
 }

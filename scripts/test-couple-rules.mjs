@@ -46,6 +46,7 @@ import {
 import {
   connectFirestoreEmulator,
   addDoc,
+  Bytes,
   collection,
   deleteDoc,
   doc,
@@ -212,6 +213,18 @@ await setDoc(doc(db, "users", uidA, "budget", "katering"), {
     },
   ],
 });
+
+// Struk A sebagai dokumen Firestore (pengganti Storage) → uji baca/tulis silang.
+const receiptByA = doc(collection(db, "users", uidA, "receipts"));
+await expectAllowed(
+  "A menyimpan foto struk (dokumen subcollection receipts)",
+  setDoc(receiptByA, {
+    image: Bytes.fromUint8Array(new Uint8Array([1, 2, 3, 4])),
+    contentType: "image/jpeg",
+    size: 4,
+    createdAt: stamp,
+  })
+);
 
 await signOut(auth);
 
@@ -523,6 +536,28 @@ await expectAllowed(
     createdAt: stamp + 100,
   })
 );
+await expectAllowed(
+  "B membaca struk milik A (receipts — jalur lihat struk pasangan)",
+  getDoc(receiptByA).then((snapshot) => {
+    // Baca harus menghasilkan bytes yang bisa ditampilkan (Bytes/Uint8Array).
+    const image = snapshot.data()?.image;
+    const bytes =
+      image instanceof Uint8Array ? image : image?.toUint8Array?.();
+    if (!bytes || bytes.length !== 4) {
+      throw new Error("field image tidak terbaca sebagai bytes");
+    }
+  })
+);
+const receiptDocByB = doc(collection(db, "users", uidA, "receipts"));
+await expectAllowed(
+  "B menulis struk baru ke workspace A (jalur merge)",
+  setDoc(receiptDocByB, {
+    image: Bytes.fromUint8Array(new Uint8Array([9, 9, 9])),
+    contentType: "image/jpeg",
+    size: 3,
+    createdAt: stamp + 100,
+  })
+);
 
 // --- 8. Storage: B upload struk ke folder A -------------------------------
 const receiptByB = `users/${uidA}/receipts/couple-test-b.jpg`;
@@ -568,6 +603,10 @@ await expectDenied(
     isDone: false,
     createdAt: stamp,
   })
+);
+await expectDenied(
+  "C membaca struk milik A",
+  getDoc(receiptByA)
 );
 await expectDenied(
   "C mengubah profil A",
@@ -666,6 +705,8 @@ try {
   await deleteDoc(bNewItem).catch(() => {});
   await deleteDoc(guestByB).catch(() => {});
   await deleteDoc(prepByB).catch(() => {});
+  await deleteDoc(receiptByA).catch(() => {});
+  await deleteDoc(receiptDocByB).catch(() => {});
   await deleteDoc(doc(db, "users", uidA, "budget", "katering")).catch(() => {});
   await deleteDoc(doc(db, "users", uidA, "budget", "dekorasi")).catch(() => {});
   await deleteDoc(doc(db, "users", uidA)).catch(() => {});

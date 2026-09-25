@@ -9,14 +9,9 @@ import {
   setDoc,
   where,
 } from "firebase/firestore";
-import { getBytes, getDownloadURL, ref, uploadBytes } from "firebase/storage";
 import type { User } from "firebase/auth";
-import {
-  getDb,
-  getFirebaseStorage,
-  isFirebaseConfigured,
-} from "@/lib/firebase";
-import { MAX_RECEIPT_SIZE } from "@/lib/budget-service";
+import { getDb } from "@/lib/firebase";
+import { asImageBytes, imageFieldValue } from "@/lib/receipt-service";
 import type { Expense, UserProfile } from "@/types";
 
 /**
@@ -122,56 +117,39 @@ function expenseKey(expense: Expense): string {
   return `${expense.description}|${expense.amount}|${expense.date}`;
 }
 
-function guessMimeType(name: string): string {
-  const ext = name.toLowerCase().split(".").pop() ?? "";
-  if (ext === "png") return "image/png";
-  if (ext === "webp") return "image/webp";
-  if (ext === "gif") return "image/gif";
-  if (ext === "heic") return "image/heic";
-  if (ext === "pdf") return "application/pdf";
-  return "image/jpeg";
-}
-
 /**
- * Salin file struk milik akun sendiri ke folder workspace (best-effort):
- * supaya struk yang ikut tersalin tetap terbaca pemilik workspace bahkan
- * setelah lepas tautan. Bila gagal → pertahankan URL lama (masih terbaca
- * pasangan selama tertaut via storage rules couple dua arah).
+ * Salin foto struk milik akun sendiri ke workspace (best-effort): dokumen
+ * struk di `users/{fromUid}/receipts` disalin ke `users/{ownerUid}/receipts`
+ * supaya tetap terbaca pemilik workspace bahkan SETELAH lepas tautan.
+ * Bila gagal → pertahankan id lama (masih terbaca pasangan selama tertaut,
+ * via rules `hasWorkspaceAccess`).
  */
 async function copyReceiptToWorkspace(
   expense: Expense,
+  fromUid: string,
   ownerUid: string
 ): Promise<Expense> {
-  const url = expense.receiptUrl;
-  if (!url || !isFirebaseConfigured) return expense;
+  if (!expense.receiptId || fromUid === ownerUid) return expense;
   try {
-    let blob: Blob;
-    let sourceName = "receipt";
-    if (/^https?:\/\//i.test(url)) {
-      const response = await fetch(url);
-      if (!response.ok) return expense;
-      blob = await response.blob();
-      sourceName = url.split("/").pop()?.split("?")[0] ?? sourceName;
-    } else {
-      // Bentuk lama: path relatif bucket.
-      const bytes = await getBytes(ref(getFirebaseStorage(), url));
-      blob = new Blob([bytes]);
-      sourceName = url.split("/").pop() ?? sourceName;
-    }
-    if (blob.size === 0 || blob.size >= MAX_RECEIPT_SIZE) return expense;
-    const safeName =
-      decodeURIComponent(sourceName).replace(/[^\w.-]+/g, "_").slice(-60) ||
-      "receipt";
-    const destination = ref(
-      getFirebaseStorage(),
-      `users/${ownerUid}/receipts/${Date.now()}-${safeName}`
+    const db = getDb();
+    const source = await getDoc(
+      doc(db, "users", fromUid, "receipts", expense.receiptId)
     );
-    await uploadBytes(destination, blob, {
-      contentType: blob.type || guessMimeType(safeName),
-    });
-    return { ...expense, receiptUrl: await getDownloadURL(destination) };
+    const data = source.data();
+    const imageBytes = asImageBytes(data?.image);
+    if (!source.exists() || !data || !imageBytes) return expense;
+    const destination = await addDoc(
+      collection(db, "users", ownerUid, "receipts"),
+      {
+        image: imageFieldValue(imageBytes),
+        contentType: data.contentType ?? "image/jpeg",
+        size: typeof data.size === "number" ? data.size : 0,
+        createdAt: Date.now(),
+      }
+    );
+    return { ...expense, receiptId: destination.id };
   } catch {
-    return expense; // best-effort: URL lama tetap terbaca selama tertaut
+    return expense; // best-effort: id lama tetap terbaca selama tertaut
   }
 }
 
@@ -274,7 +252,8 @@ async function mergeOwnDataInto(ownerUid: string, user: User): Promise<void> {
 
   // 4) Budget: kategori yang belum ada disalin penuh; yang sudah ada →
   //    gabung expenses (dedup) + alokasi workspace dipertahankan (bila 0,
-  //    baru diambil dari data sendiri). Struk ikut disalin ke folder workspace.
+  //    baru diambil dari data sendiri). Struk ikut disalin sebagai dokumen
+  //    di subcollection receipts workspace.
   const [ownBudget, ownerBudget] = await Promise.all([
     getDocs(collection(db, "users", user.uid, "budget")),
     getDocs(collection(db, "users", ownerUid, "budget")),
@@ -293,7 +272,7 @@ async function mergeOwnDataInto(ownerUid: string, user: User): Promise<void> {
     if (!target) {
       const copied: Expense[] = [];
       for (const expense of ownExpenses) {
-        copied.push(await copyReceiptToWorkspace(expense, ownerUid));
+        copied.push(await copyReceiptToWorkspace(expense, user.uid, ownerUid));
       }
       await setDoc(doc(db, "users", ownerUid, "budget", snap.id), {
         categoryName,
@@ -313,7 +292,7 @@ async function mergeOwnDataInto(ownerUid: string, user: User): Promise<void> {
       const key = expenseKey(expense);
       if (haveExpenses.has(key)) continue;
       haveExpenses.add(key);
-      expenses.push(await copyReceiptToWorkspace(expense, ownerUid));
+      expenses.push(await copyReceiptToWorkspace(expense, user.uid, ownerUid));
       added++;
     }
     if (added === 0) continue;

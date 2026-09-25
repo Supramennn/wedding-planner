@@ -31,3 +31,8 @@ export function guestsPath(uid: string): string {
 export function prepPath(uid: string): string {
   return `users/${uid}/prepItems`;
 }
+
+/** Foto struk pengeluaran (gambar terkompres — bytes di Firestore). */
+export function receiptsPath(uid: string): string {
+  return `users/${uid}/receipts`;
+}

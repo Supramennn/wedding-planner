@@ -24,6 +24,7 @@ import { AllocationForm } from "@/components/budget/allocation-form";
 import { BudgetChart } from "@/components/budget/budget-chart";
 import { ExpenseForm } from "@/components/budget/expense-form";
 import { PrepList } from "@/components/budget/prep-list";
+import { ReceiptViewer } from "@/components/budget/receipt-viewer";
 import { TotalBudgetForm } from "@/components/budget/total-budget-form";
 
 type AllocationTarget = { categoryName: string; current: number };
@@ -68,6 +69,7 @@ export function BudgetView() {
     null
   );
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
+  const [receiptTarget, setReceiptTarget] = useState<string | null>(null);
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
@@ -401,15 +403,27 @@ export function BudgetView() {
                     <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-neutral-500">
                       <Badge tone="rose">{row.categoryName}</Badge>
                       <span>{formatDateID(row.expense.date)}</span>
-                      {row.expense.receiptUrl && (
-                        <a
-                          href={row.expense.receiptUrl}
-                          target="_blank"
-                          rel="noreferrer"
+                      {row.expense.receiptId ? (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setReceiptTarget(row.expense.receiptId ?? null)
+                          }
                           className="font-medium text-rose-600 hover:underline"
                         >
                           Lihat struk
-                        </a>
+                        </button>
+                      ) : (
+                        row.expense.receiptUrl && (
+                          <a
+                            href={row.expense.receiptUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="font-medium text-rose-600 hover:underline"
+                          >
+                            Lihat struk
+                          </a>
+                        )
                       )}
                     </div>
                   </div>
@@ -518,6 +532,15 @@ export function BudgetView() {
           />
         )}
       </Modal>
+
+      {/* Modal penampil struk (Firestore) */}
+      {receiptTarget && workspaceUid && (
+        <ReceiptViewer
+          uid={workspaceUid}
+          receiptId={receiptTarget}
+          onClose={() => setReceiptTarget(null)}
+        />
+      )}
 
       {/* Modal konfirmasi hapus pengeluaran */}
       <Modal

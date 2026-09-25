@@ -28,7 +28,7 @@ WedPlan membantu calon pengantin mengelola **checklist, budget, dan vendor** per
 | Onboarding | FR-02, FR-03 | Wizard 3 langkah (nama pasangan → tanggal → lokasi) → auto-generate **19 tugas checklist default**; data bisa diedit ulang di **Pengaturan** |
 | Dashboard | FR-04…07 | Countdown hari-H, % checklist, budget terpakai vs alokasi (indikator warna), jumlah vendor per status |
 | Checklist | FR-08…11 | **10 kategori** (9 PRD + **Cincin Nikah**); CRUD item (judul/kategori/due date opsional/status); progress per kategori & total; **realtime** (tanpa tombol "save") |
-| Budget | FR-12…16 | Total budget (edit kapan saja); alokasi per kategori via **nominal atau persentase**; pengeluaran + **foto struk → Firebase Storage**; chart Recharts **alokasi vs realisasi**; warna hijau <70% / kuning 70–99% / merah ≥100%; daftar **item yang perlu disiapkan** (estimasi biaya, centang saat siap) |
+| Budget | FR-12…16 | Total budget (edit kapan saja); alokasi per kategori via **nominal atau persentase**; pengeluaran + **foto struk (dikompres otomatis → Firestore)**; chart Recharts **alokasi vs realisasi**; warna hijau <70% / kuning 70–99% / merah ≥100%; daftar **item yang perlu disiapkan** (estimasi biaya, centang saat siap) |
 | Vendor | FR-17…19 | Field lengkap + alur status Dihubungi→Nego→Deal→DP→Lunas; **dua mode tampilan**: list (sortable) & timeline (urut deadline); badge **H-7 / H-3 / H-1** + "Terlambat"/"Hari ini" |
 | **Tamu Undangan** | — | Menu **Tamu**: CRUD tamu (nama, kelompok, status, catatan) → **estimasi jumlah otomatis**: total, estimasi hadir, menunggu jawaban, belum dikirim, tidak hadir + rincian per kelompok undangan (realtime) |
 | **Lamaran (Engagement)** | — | Menu **Lamaran**: checklist persiapan lamaran **terpisah** dari nikah — kategori sendiri (**Cincin Lamaran**, Keluarga & Adat, Acara & Venue, …), progress & template 11 tugas sekali klik |
@@ -45,7 +45,7 @@ WedPlan membantu calon pengantin mengelola **checklist, budget, dan vendor** per
 | Frontend | **Next.js 16.3.6** (App Router, Turbopack untuk build; dev dikunci `--webpack`) · **React 19.2** · TypeScript |
 | Styling | **Tailwind CSS v4** |
 | Animasi | **Framer Motion 13** dengan `MotionConfig reducedMotion="user"` (aksesibilitas) |
-| Backend | **Firebase 12**: Authentication, Firestore (realtime), Storage · **FCM** push dikirim `firebase-admin` via Vercel cron |
+| Backend | **Firebase 12**: Authentication, Firestore (realtime — termasuk foto struk terkompres; **Storage tidak dipakai**, lihat catatan §5) · **FCM** push dikirim `firebase-admin` via Vercel cron |
 | Chart | **Recharts 3** |
 | Hosting | **Vercel** · PWA: service worker native (`public/sw.js`) |
 
@@ -66,9 +66,10 @@ npm run dev                          # = next dev --webpack → http://localhost
 1. [Firebase Console](https://console.firebase.google.com) → project kamu → **Project settings → Your apps → SDK setup and configuration** → salin 6 nilai ke `.env.local` (`NEXT_PUBLIC_FIREBASE_*`).
 2. **Authentication → Sign-in method** → aktifkan **Email/Password** dan **Google**.
 3. **Firestore Database → Create database** (production mode, region terdekat).
-4. **Storage → Get started**.
-5. **(Opsional — pengingat push)** Project settings → **Cloud Messaging → Web Push certificates** → *Generate keypair* → salin VAPID public key ke `NEXT_PUBLIC_FIREBASE_VAPID_KEY`.
-6. **(Opsional — pengingat push)** Project settings → **Service accounts → Generate new private key** → tempel isi file JSON utuh ke `FIREBASE_SERVICE_ACCOUNT` (hanya untuk server/Vercel — jangan commit) dan buat string acak `CRON_SECRET` (wajib sama dengan nilai di Vercel).
+4. **(Opsional — pengingat push)** Project settings → **Cloud Messaging → Web Push certificates** → *Generate keypair* → salin VAPID public key ke `NEXT_PUBLIC_FIREBASE_VAPID_KEY`.
+5. **(Opsional — pengingat push)** Project settings → **Service accounts → Generate new private key** → tempel isi file JSON utuh ke `FIREBASE_SERVICE_ACCOUNT` (hanya untuk server/Vercel — jangan commit) dan buat string acak `CRON_SECRET` (wajib sama dengan nilai di Vercel).
+
+> Catatan: **Storage tidak perlu diaktifkan** — foto struk disimpan di Firestore (terkompres), bukan Cloud Storage. Langkah "Storage → Get started" dilewati (butuh paket Blaze sejak Sep 2024).
 
 Selama `.env.local` masih kosong, aplikasi tetap bisa dibuka — semua halaman menampilkan **empty state / pesan "Firebase belum dikonfigurasi"** yang jelas (tanpa crash).
 
@@ -106,8 +107,9 @@ lib/
   couple-service.ts          # Kolaborasi pasangan: cari/klaim/batal undangan, unlink
   guest-service.ts           # CRUD daftar tamu undangan (estimasi jumlah)
   prep-service.ts            # CRUD item "yang perlu disiapkan" (modul budget)
+  receipt-service.ts         # Foto struk: kompres di klien + simpan/hapus/baca di Firestore
   push/client.ts             # Klien FCM: izin notifikasi + simpan/hapus token
-  *-service.ts               # Tulis-baca Firestore/Storage per modul
+  *-service.ts               # Tulis-baca Firestore per modul
   hooks/                     # auth-context (resolusi workspace + auto-claim), auth-guard,
                              # guest-guard, use-collection (realtime)
 app/api/cron/reminders/route.ts  # Cron FCM: kirim pengingat deadline (ditandatangani CRON_SECRET)
@@ -137,7 +139,11 @@ users/{userId}/checklist/{itemId}
   - phase*                   (*absen = nikah; "engagement" = lamaran — koleksi dipakai bersama)
 
 users/{userId}/budget/{categoryId}
-  - categoryName, allocatedAmount, expenses: [{ description, amount, date, receiptUrl }]
+  - categoryName, allocatedAmount, expenses: [{ description, amount, date, receiptId, receiptUrl* }]
+      (*receiptUrl = tautan legacy opsional; struk baru memakai receiptId)
+
+users/{userId}/receipts/{receiptId}      (foto struk terkompres — pengganti Storage)
+  - image (bytes, JPEG hasil kompresi klien), contentType, size, createdAt
 
 users/{userId}/vendors/{vendorId}
   - name, category, contact, status, dealAmount, paymentDeadline, notes, createdAt
@@ -157,17 +163,17 @@ users/{userId}/reminderLog/{logId}      (tulis HANYA Admin SDK server; client DE
 - `totalBudget` (FR-12) — PRD tidak menentukan lokasi penyimpanan total budget, maka disimpan sebagai **field tambahan** di `users/{userId}`, sesuai NFR "struktur siap ditambah field baru tanpa migrasi". `venue`/`weddingDate` dikosongkan lagi = user belum onboarding (dipakai guard `/onboarding`).
 - `categoryId` = **slug determinik** dari nama kategori (mis. `Legal/Dokumen` → `legal-dokumen`) sehingga alokasi selalu upsert, tidak pernah menggandakan dokumen.
 - Item `expenses` diedit berbasis **index** dalam array (skema persis PRD, tanpa id per-transaksi) — aman untuk single-user.
-- **Storage:** struk di `users/{uid}/receipts/{timestamp}-{nama}`, maks **5 MB** (divalidasi di aplikasi *dan* rules). ⚠️ **Cloud Storage butuh paket Blaze** (kebijakan Google sejak Sep 2024 — Spark plan ditolak 402 dan bucket default tidak bisa dibuat). Selama di Spark, form pengeluaran **tetap menyimpan transaksi tanpa struk** + peringatan amber (tidak gagal); `storage.rules` baru bisa di-deploy setelah bucket ada (Get Started di Console setelah pindah Blaze).
+- **Struk (pengganti Storage):** foto struk **dikompres otomatis di klien** (JPEG, sisi terpanjang 1600px, turunkan kualitas lalu dimensi hingga ≤900 KB) lalu disimpan sebagai dokumen `users/{uid}/receipts/{receiptId}` (field `bytes`) — `expense.receiptId` menunjuknya, dan tombol "Lihat struk" memuatnya ke modal. Alasan: **Cloud Storage butuh paket Blaze** (kebijakan Google sejak Sep 2024 — Spark ditolak 402); jalur Firestore ini **$0 di paket Spark, privat via rules `hasWorkspaceAccess`** (tidak ada URL publik seperti halnya URL unduhan Storage), tanpa migrasi (belum ada struk produksi tersimpan), dan merge cukup menyalin dokumen. Dokumen dijaga < 1 MiB (limit Firestore); field legacy `receiptUrl` tetap didukung untuk tampil bila ada. `storage.rules` tetap teruji di emulator namun **tidak dipakai aplikasi** — hanya relevan bila kelak pindah Blaze/Storage lagi.
 - **Kategori cincin:** `CHECKLIST_CATEGORIES` memuat **"Cincin Nikah"** (checklist/budget/vendor seragam otomatis — baris alokasi & pilihan kategori ikut muncul), dan `ENGAGEMENT_CATEGORIES` memuat **"Cincin Lamaran"** — persiapan cincin dua acara terpisah rapi.
 - **Kolaborasi (Phase 2):** data pernikahan tetap di bawah `users/{pemilik}`; pasangan menautkan akunnya lewat `linkedTo` di dokumennya sendiri. `workspaceUid = linkedTo ?? uid sendiri` (lihat `auth-context.tsx`) — semua modul membaca path dari `workspaceUid`, sehingga dua akun realtime pada dataset yang sama. Field couple bersifat **additive** (dokumen lama tanpa field ini tetap sah — rules menanganinya).
-- **Merge dua data (Phase 2):** bila kedua akun sudah onboarding, tautan lewat tombol di kartu Pengaturan — **klaim dulu, baru salin**: profil mengisi kekosongan (workspace menang), checklist/vendor dedup (judul+kategori / nama+kategori), budget per-slug (alokasi workspace dipertahankan, expenses menyatu), struk disalin best-effort ke folder workspace, penanda `mergedFromUid` ditulis **terakhir** (retry aman, tidak menggandakan).
+- **Merge dua data (Phase 2):** bila kedua akun sudah onboarding, tautan lewat tombol di kartu Pengaturan — **klaim dulu, baru salin**: profil mengisi kekosongan (workspace menang), checklist/vendor dedup (judul+kategori / nama+kategori), budget per-slug (alokasi workspace dipertahankan, expenses menyatu), dokumen struk disalin best-effort ke `receipts` workspace (id baru → tetap terbaca setelah lepas tautan), penanda `mergedFromUid` ditulis **terakhir** (retry aman, tidak menggandakan).
 - **Push (Phase 2):** `fcmTokens` ada di dokumen SETIAP akun; cron mengumpulkan token workspace + `partnerUid` → unlink otomatis memutus kiriman ke mantan pasangan.
 - **Lamaran terpisah dari nikah:** item checklist keduanya berada di koleksi **sama** (`checklist`), dibedakan field additive `phase: "engagement"` (data lama tanpa field = nikah) → tanpa migrasi, rules & realtime tetap yang sudah teruji. Menu Checklist menyaring `phase !== "engagement"`, menu Lamaran sebaliknya. Kategori lamaran (`ENGAGEMENT_CATEGORIES`) terpisah dari kategori nikah.
 - **Daftar tamu & item persiapan:** dua subcollection baru `guests` dan `prepItems` di bawah workspace — ikut aturan `hasWorkspaceAccess` yang sama (pasangan tertaut ikut mengisi). Estimasi hadir = status Hadir + Terkirim (belum menjawab); item persiapan membawa `plannedAmount` sehingga total rencana bisa dibandingkan dengan alokasi budget.
 
 ## 6. Keamanan (Security Rules) & Uji Isolasi
 
-**Prinsip: owner-only, default deny.** `firestore.rules` hanya membuka `users/{ownUserId}/**` — path lain otomatis ditolak. Untuk **kolaborasi Phase 2**, pasangan tertaut (`partnerUid == request.auth.uid`, dicek via `get()` ke dokumen induk — path tetap, tervalidasi sekali per list) mendapat akses penuh ke workspace-nya; penerima undangan hanya bisa membaca profil ber-`partnerEmail` sama dengan token emailnya dan mengklaim dua field tautan. `storage.rules` memisahkan `read` / `write` (maks 5 MB) / `delete`, dengan cek pasangan **dua arah** via `firestore.get()` (`partnerUid` ATAU `linkedTo`, dijaga `keys().hasAny()` untuk dokumen legacy) — arah `linkedTo` membuat pemilik tetap bisa membuka struk lama pasangan hasil **merge**.
+**Prinsip: owner-only, default deny.** `firestore.rules` hanya membuka `users/{ownUserId}/**` — path lain otomatis ditolak. Untuk **kolaborasi Phase 2**, pasangan tertaut (`partnerUid == request.auth.uid`, dicek via `get()` ke dokumen induk — path tetap, tervalidasi sekali per list) mendapat akses penuh ke workspace-nya; penerima undangan hanya bisa membaca profil ber-`partnerEmail` sama dengan token emailnya dan mengklaim dua field tautan. Subcollection baru `guests`, `prepItems`, dan `receipts` (struk) ikut aturan `hasWorkspaceAccess` yang sama. `storage.rules` (kini **tidak dipakai aplikasi** — struk di Firestore) tetap memisahkan `read` / `write` (maks 5 MB) / `delete` dengan cek pasangan **dua arah** via `firestore.get()`, tetap teruji di emulator bila kelak di-deploy ulang.
 
 > Rules dipisah per operasi karena `request.resource` bernilai `null` saat READ/DELETE — menggabungkannya dengan `request.resource.size` akan menolak operasi tersebut.
 
@@ -176,10 +182,10 @@ users/{userId}/reminderLog/{logId}      (tulis HANYA Admin SDK server; client DE
 ```bash
 npm install -g firebase-tools   # atau pakai npx
 firebase login
-firebase deploy --only firestore:rules,storage
+firebase deploy --only firestore:rules
 ```
 
-> Catatan: bagian `storage` hanya bisa di-deploy **setelah bucket Storage dibuat** (Get Started di Firebase Console) — dan sejak Sep 2024 itu butuh **paket Blaze**. Selama di paket Spark, jalankan `firebase deploy --only firestore:rules` saja (tidak ada perubahan storage yang bisa di-deploy).
+> Catatan: **hanya `firestore.rules` yang dipakai** (semua data termasuk foto struk). Deploy `storage` (mis. `firebase deploy --only storage`) hanya relevan bila kelak memakai Cloud Storage lagi — itu butuh bucket (Get Started di Console) yang sejak Sep 2024 mewajibkan **paket Blaze**, sedangkan aplikasi kini tidak menyentuh Storage sama sekali.
 
 ### Uji isolasi (syarat DoD — user A tidak bisa akses data user B)
 
@@ -190,16 +196,18 @@ npx firebase-tools emulators:exec --only auth,firestore,storage \
   --project demo-wedplan "node scripts/test-rules-isolation.mjs --emulator && node scripts/test-couple-rules.mjs --emulator"
 ```
 
-Skrip **`test-couple-rules.mjs`** (Phase 2) menambah **45 skenario** kolaborasi & merge: temukan undangan via query email sendiri → klaim dua langkah → **simulasi merge** (isi kekosongan profil, salin checklist dengan dedup — 2 dari 3 item, gabung budget per-slug, penanda idempoten) → pasangan membaca/menulis checklist, budget, profil, **daftar tamu & item persiapan** workspace, upload struk ke folder pasangan (semua `PASS`); arah storage `linkedTo` (pemilik membaca struk lama pasangan `PASS`, gugur setelah unlink); pihak ketiga C ditolak total termasuk upaya klaim **dan akses koleksi baru**; setelah unlink oleh pemilik, akses pasangan gugur kembali sementara data miliknya sendiri tetap terbaca. Total kedua skrip: **54 skenario**.
+Skrip **`test-couple-rules.mjs`** (Phase 2) menambah **49 skenario** kolaborasi & merge: temukan undangan via query email sendiri → klaim dua langkah → **simulasi merge** (isi kekosongan profil, salin checklist dengan dedup — 2 dari 3 item, gabung budget per-slug, penanda idempoten) → pasangan membaca/menulis checklist, budget, profil, **daftar tamu, item persiapan & struk (`receipts`)** workspace — pasangan membaca struk A dengan verifikasi field `bytes` terbaca, dan menulis struk baru ke workspace (jalur merge) — semua `PASS`; upload struk ke folder pasangan via storage rules juga `PASS`; arah storage `linkedTo` (pemilik membaca struk lama pasangan `PASS`, gugur setelah unlink); pihak ketiga C ditolak total termasuk upaya klaim, akses koleksi baru **dan baca struk**; setelah unlink oleh pemilik, akses pasangan gugur kembali sementara data miliknya sendiri tetap terbaca. Total kedua skrip: **59 skenario**.
 
 **Jalur B — proyek asli (setelah rules di-deploy):**
+
+> Catatan: skrip juga memuat skenario **upload ke Cloud Storage**; pada proyek tanpa bucket (paket Spark, kebijakan Blaze) skenario Storage itu gagal — itu dikenal & tidak relevan bagi aplikasi karena struk kini tersimpan di Firestore. Skenario Firestore tetap valid dibaca per baris PASS/FAIL.
 
 ```bash
 # isi .env.local dulu, lalu:
 node scripts/test-rules-isolation.mjs
 ```
 
-Skrip menguji 10+ skenario: A akses data sendiri (wajib lolos), akses tanpa login, B membaca/menulis/menghapus data A, dan B mengunggah struk ke folder A — semuanya wajib `DENY`. Keluaran `PASS/FAIL` per skenario, exit code ≠ 0 bila gagal. Jalur B membuat 2 akun uji `rules-test-*@example.com` (dokumen dibersihkan otomatis; akun bisa dihapus via Console → Authentication).
+Skrip menguji **10 skenario**: A akses data sendiri (wajib lolos), akses tanpa login, B membaca/menulis/menghapus data A — termasuk **B membaca struk milik A** — dan B mengunggah struk ke folder A, semuanya wajib `DENY`/lolos sesuai harapan. Keluaran `PASS/FAIL` per skenario, exit code ≠ 0 bila gagal. Jalur B membuat 2 akun uji `rules-test-*@example.com` (dokumen dibersihkan otomatis; akun bisa dihapus via Console → Authentication).
 
 **Jalur manual (tanpa alat):** Firebase Console → Firestore → **Rules → Testing tab** → simulasi `uid: userA` pada dokumen `users/userB/...` → hasil wajib **DENY**; atau dua browser (normal + incognito) dengan dua akun berbeda.
 
@@ -257,7 +265,7 @@ Skrip menguji 10+ skenario: A akses data sendiri (wajib lolos), akses tanpa logi
 | Login Google gagal (popup) | Domain belum di *Authorized domains*, atau popup diblokir |
 | Tampilan CSS aneh di dev | Pastikan `npm run dev` (webpack), bukan `next dev` biasa |
 | Halaman offline terus-muncul padahal online | Buka DevTools → Application → Service Workers → *Unregister*, atau bump `VERSION` |
-| Struk gagal diunggah | Ukuran >5 MB, Storage belum aktif, atau `storage.rules` belum di-deploy — **Cloud Storage sejak Sep 2024 wajib paket Blaze** (Spark ditolak 402); selama di Spark pengeluaran **tetap tersimpan tanpa struk** + peringatan otomatis di form, dan struk langsung bisa setelah pindah Blaze → Get Started → `firebase deploy --only storage` |
+| Struk gagal disimpan | Gambar rusak/format tak didukung → pilih JPG/PNG lain (pesan error muncul di form, transaksi **tidak** hilang); foto terlalu berat setelah kompresi → foto ulang; offline → cek koneksi lalu ulangi. Struk disimpan di Firestore (**tanpa paket Blaze**), jadi tak ada lagi hambatan Storage |
 | Pengingat push tidak masuk | Env push belum lengkap (VAPID/CRON_SECRET/service account) · belum klik "Aktifkan pengingat" · `permission-denied` di **Vercel → Logs** untuk cron = `CRON_SECRET` beda antara Vercel & kode · `503` = `FIREBASE_SERVICE_ACCOUNT` kosong/tidak valid · di luar jendela 07.00–21.00 WIB memang di-skip |
 | Pasangan tidak bisa akses data | Undangan belum diklaim (pasangan harus daftar/masuk **dengan email yang diundang**) · `firestore.rules`/`storage.rules` terbaru belum di-deploy · kedua akun sudah punya data sendiri → pakai tombol **"Gabungkan data & tautkan"** di kartu Kolaborasi pasangan (Pengaturan) |
 
@@ -270,7 +278,7 @@ Skrip menguji 10+ skenario: A akses data sendiri (wajib lolos), akses tanpa logi
 - [ ] **3 modul tanpa bug kritis**:
   - [ ] Onboarding baru → 19 tugas default muncul; edit data di Pengaturan → countdown dashboard ikut berubah.
   - [ ] Checklist: tambah/ubah/hapus/toggle → langsung tersimpan (buka tab kedua → sinkron realtime); progress per kategori & total benar.
-  - [ ] Budget: set total → alokasi % dan Rp → catat pengeluaran + struk → chart & warna sesuai ambang; sisa budget benar. *(struk aktif setelah paket Blaze; di Spark pengeluaran tetap tersimpan tanpa struk + peringatan amber)*
+  - [ ] Budget: set total → alokasi % dan Rp → catat pengeluaran + struk → chart & warna sesuai ambang; sisa budget benar. *(struk otomatis dikompres & tersimpan privat di Firestore — tanpa paket Blaze)*
   - [ ] Vendor: 2 mode tampilan; deadline 7/3/1 hari ke depan menampilkan badge H-7/H-3/H-1; status berpindah tahap.
   - [ ] Tamu: tambah tamu → angka estimasi (total/hadir/menunggu/belum dikirim) & rincian per kelompok ikut berubah realtime; pasangan di akun kedua melihat data yang sama.
   - [ ] Lamaran: menu **Lamaran** terpisah dari **Checklist** (tugas lamaran tidak muncul di checklist nikah dan sebaliknya); "Muat template persiapan" membuat 11 tugas (tidak menggandakan saat diklik ulang).
@@ -291,7 +299,7 @@ Sesuai PRD (Out-of-Scope + Roadmap Fase 2). **Kolaborasi 2 akun (termasuk merge 
 
 **Catatan keputusan implementasi** (kandidat perbaikan, bukan fitur baru):
 
-- **Kolaborasi pasangan (Phase 2)** — undangan via **email** (`partnerEmail` + auto-claim sekali per sesi di `auth-context`) alih-alih kode manual: tanpa langkah salin-tempel, tautan terjadi otomatis saat pasangan login. Data tetap di path PRD `users/{pemilik}` (tanpa migrasi); `workspaceUid = linkedTo ?? uid sendiri`. Klaim dibatasi rules `hasOnly(['partnerUid','coupleStatus'])` sehingga penerima undangan tidak bisa mengubah data lain sebelum tautan sah. Kedua akun dianggap **co-owner penuh** (model kepercayaan: pasangan = satu tim). **Merge** (kasus kedua-duanya sudah terisi): tombol **eksplisit** di Pengaturan — klaim dua langkah dulu, baru penyalinan (`mergeAndClaim`: profil isi-kosong, checklist/vendor dedup, budget per-slug dengan alokasi workspace menang, struk disalin best-effort ke folder workspace); auto-claim **tidak pernah** merge diam-diam; penanda `mergedFromUid` (tulis terakhir) membuat retry idempoten.
+- **Kolaborasi pasangan (Phase 2)** — undangan via **email** (`partnerEmail` + auto-claim sekali per sesi di `auth-context`) alih-alih kode manual: tanpa langkah salin-tempel, tautan terjadi otomatis saat pasangan login. Data tetap di path PRD `users/{pemilik}` (tanpa migrasi); `workspaceUid = linkedTo ?? uid sendiri`. Klaim dibatasi rules `hasOnly(['partnerUid','coupleStatus'])` sehingga penerima undangan tidak bisa mengubah data lain sebelum tautan sah. Kedua akun dianggap **co-owner penuh** (model kepercayaan: pasangan = satu tim). **Merge** (kasus kedua-duanya sudah terisi): tombol **eksplisit** di Pengaturan — klaim dua langkah dulu, baru penyalinan (`mergeAndClaim`: profil isi-kosong, checklist/vendor dedup, budget per-slug dengan alokasi workspace menang, dokumen struk disalin best-effort ke `receipts` workspace); auto-claim **tidak pernah** merge diam-diam; penanda `mergedFromUid` (tulis terakhir) membuat retry idempoten.
 - **Push FCM (Phase 2)** — pengiriman **server-side** via `firebase-admin` di route cron Vercel (klien tidak pernah memegang kredensial); dedupe `reminderLog` per item+tanggal; token disimpan **per akun** (bukan gabungan workspace) agar unlink otomatis memutus kiriman ke mantan pasangan; jendela kirim 07.00–21.00 WIB agar tidak mengganggu malam. **Jadwal `0 2 * * *` (≈09.00 WIB) mengikuti batas plan Hobby Vercel (maks 1×/sehari — lebih sering bikin deploy gagal)**; pengingat harian granularity jadi cukup — satu pass mengirim semua H-7/H-3/H-1/H-0 yang jatuh hari itu. Butuh lebih sering → upgrade Pro lalu ubah `schedule` (endpoint & dedupe tetap aman).
 
 - `totalBudget` disimpan di `users/{userId}` — lokasi tidak dispesifikasi PRD untuk FR-12.

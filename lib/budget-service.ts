@@ -1,30 +1,20 @@
 import {
-  deleteObject,
-  getDownloadURL,
-  ref,
-  uploadBytes,
-} from "firebase/storage";
-import {
   doc,
   getDoc,
   setDoc,
   type DocumentData,
 } from "firebase/firestore";
-import {
-  getDb,
-  getFirebaseStorage,
-  isFirebaseConfigured,
-} from "@/lib/firebase";
+import { getDb } from "@/lib/firebase";
 import { budgetPath, userDocPath } from "@/lib/collection-paths";
+import { deleteReceipt } from "@/lib/receipt-service";
 import type { Expense } from "@/types";
 
 /**
  * Service modul Budget (FR-12 s/d FR-16).
  * Skema: users/{uid}/budget/{categoryId} = { categoryName, allocatedAmount, expenses[] }
  * ID kategori = slug determinik agar upsert tidak pernah menggandakan dokumen.
+ * Foto struk disimpan terpisah di users/{uid}/receipts (lihat receipt-service).
  */
-
-export const MAX_RECEIPT_SIZE = 5 * 1024 * 1024; // 5 MB (sinkron dgn storage.rules)
 
 export function categorySlug(categoryName: string): string {
   return categoryName
@@ -109,7 +99,7 @@ export async function updateExpense(
   await setDoc(refDoc, { ...data, expenses });
 }
 
-/** Hapus pengeluaran (termasuk struk di Storage, best-effort). */
+/** Hapus pengeluaran (termasuk struk di subcollection receipts, best-effort). */
 export async function deleteExpense(
   uid: string,
   categoryName: string,
@@ -122,32 +112,11 @@ export async function deleteExpense(
   const [removed] = expenses.splice(index, 1);
   await setDoc(refDoc, { ...data, expenses });
 
-  if (removed?.receiptUrl) {
+  if (removed?.receiptId) {
     try {
-      // ref() menerima URL unduhan lengkap milik bucket ini (best-effort).
-      await deleteObject(ref(getFirebaseStorage(), removed.receiptUrl));
+      await deleteReceipt(uid, removed.receiptId);
     } catch {
       // Struk gagal dihapus tidak menghalangi UX utama.
     }
   }
-}
-
-/** Upload struk ke Firebase Storage → URL publik (opsional, FR-14). */
-export async function uploadReceipt(uid: string, file: File): Promise<string> {
-  if (!isFirebaseConfigured) {
-    throw new Error("Firebase belum dikonfigurasi.");
-  }
-  if (file.size > MAX_RECEIPT_SIZE) {
-    throw new Error("Ukuran struk maksimal 5 MB.");
-  }
-
-  const safeName = file.name.replace(/[^\w.-]+/g, "_");
-  const objectRef = ref(
-    getFirebaseStorage(),
-    `users/${uid}/receipts/${Date.now()}-${safeName}`
-  );
-  const snapshot = await uploadBytes(objectRef, file, {
-    contentType: file.type,
-  });
-  return await getDownloadURL(snapshot.ref);
 }

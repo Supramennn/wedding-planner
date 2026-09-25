@@ -97,6 +97,11 @@ service cloud.firestore {
         allow read, write: if hasWorkspaceAccess(userId);
       }
 
+      // Foto struk pengeluaran (gambar terkompres — bytes; pengganti Storage)
+      match /receipts/{receiptId} {
+        allow read, write: if hasWorkspaceAccess(userId);
+      }
+
       // Log pengiriman reminder (hanya Admin SDK server; client DENY).
       match /reminderLog/{logId} {
         allow read, write: if false;
