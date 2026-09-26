@@ -1,8 +1,10 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
 import { useAuth } from "@/lib/hooks/auth-context";
 import { useCollection } from "@/lib/hooks/use-collection";
+import { useOptimisticToggle } from "@/lib/hooks/use-optimistic-toggle";
 import { checklistPath } from "@/lib/collection-paths";
 import {
   checklistStats,
@@ -10,6 +12,7 @@ import {
 } from "@/lib/aggregate";
 import { CHECKLIST_CATEGORIES } from "@/lib/constants";
 import { daysUntil, formatDateID } from "@/lib/format";
+import { listItemVariants } from "@/lib/motion";
 import {
   deleteChecklistItem,
   toggleChecklistItem,
@@ -44,10 +47,15 @@ export function ChecklistView() {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
+  // Toggle.optimis: centang berubah seketika, lalu dilepas begitu snapshot
+  // Firestore menyusul (atau dibatalkan kalau gagal simpan). Dashboard
+  // angka dan progress memakai liveItems, jadi ikut berubah seketika.
+  const { liveItems, toggle } = useOptimisticToggle(items, "isCompleted");
+
   // Pisahkan tahap: item engagement tampil di menu "Lamaran", bukan di sini.
   const weddingItems = useMemo(
-    () => items.filter((item) => item.phase !== "engagement"),
-    [items]
+    () => liveItems.filter((item) => item.phase !== "engagement"),
+    [liveItems]
   );
   const groups = useMemo(
     () => groupChecklistByCategory(weddingItems, CHECKLIST_CATEGORIES),
@@ -151,81 +159,96 @@ export function ChecklistView() {
               />
 
               <ul className="mt-3 divide-y divide-neutral-100">
-                {group.items.map((item) => {
-                  const overdue =
-                    !item.isCompleted &&
-                    daysUntil(item.dueDate) !== null &&
-                    (daysUntil(item.dueDate) as number) < 0;
+                {/* initial={false}: item yang sudah ada saat halaman dibuka
+                    tidak dianimasikan. Hanya item yang datang SESUDAH itu
+                    (mis. pasanganmu yang baru mencentang) yang bergerak. */}
+                <AnimatePresence initial={false}>
+                  {group.items.map((item) => {
+                    const overdue =
+                      !item.isCompleted &&
+                      daysUntil(item.dueDate) !== null &&
+                      (daysUntil(item.dueDate) as number) < 0;
 
-                  return (
-                    <li
-                      key={item.id}
-                      className="flex items-start gap-3 py-3"
-                    >
-                      <input
-                        type="checkbox"
-                        checked={item.isCompleted}
-                        disabled={busyId === item.id}
-                        onChange={() =>
-                          workspaceUid &&
-                          runAction(item.id, () =>
-                            toggleChecklistItem(workspaceUid, item)
-                          )
-                        }
-                        aria-label={`Tandai selesai: ${item.title}`}
-                        className="mt-0.5 size-5 shrink-0 rounded accent-rose-600 disabled:opacity-50"
-                      />
-
-                      <div className="min-w-0 flex-1">
-                        <p
-                          className={`text-sm ${
-                            item.isCompleted
-                              ? "text-neutral-400 line-through"
-                              : "text-neutral-800"
-                          }`}
-                        >
-                          {item.title}
-                        </p>
-                        <div className="mt-1 flex flex-wrap items-center gap-2 text-xs">
-                          <Badge tone="rose">{item.category}</Badge>
-                          {item.dueDate && (
-                            <span
-                              className={
-                                overdue
-                                  ? "font-medium text-red-600"
-                                  : "text-neutral-500"
-                              }
-                            >
-                              {formatDateID(item.dueDate)}
-                              {overdue ? " · terlambat" : ""}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-
-                      <div className="flex shrink-0 items-center gap-1">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="text-xs"
-                          onClick={() =>
-                            setFormTarget({ mode: "edit", item })
+                    return (
+                      <motion.li
+                        key={item.id}
+                        variants={listItemVariants}
+                        initial="initial"
+                        animate="animate"
+                        exit="exit"
+                        className="flex items-start gap-3 py-3"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={item.isCompleted}
+                          onChange={() =>
+                            workspaceUid &&
+                            toggle(
+                              item,
+                              (id, next) =>
+                                toggleChecklistItem(workspaceUid, id, next),
+                              () => setActionError(ACTION_ERROR)
+                            )
                           }
-                        >
-                          Ubah
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="text-xs text-red-600 hover:bg-red-50 hover:text-red-700"
-                          onClick={() => setPendingDelete(item)}
-                        >
-                          Hapus
-                        </Button>
-                      </div>
-                    </li>
-                  );
-                })}
+                          aria-label={
+                            item.isCompleted
+                              ? `Batalkan selesai: ${item.title}`
+                              : `Tandai selesai: ${item.title}`
+                          }
+                          className="mt-0.5 size-5 shrink-0 cursor-pointer rounded accent-rose-600"
+                        />
+
+                        <div className="min-w-0 flex-1">
+                          <p
+                            className={`text-sm ${
+                              item.isCompleted
+                                ? "text-neutral-400 line-through"
+                                : "text-neutral-800"
+                            }`}
+                          >
+                            {item.title}
+                          </p>
+                          <div className="mt-1 flex flex-wrap items-center gap-2 text-xs">
+                            <Badge tone="rose">{item.category}</Badge>
+                            {item.dueDate && (
+                              <span
+                                className={
+                                  overdue
+                                    ? "font-medium text-red-600"
+                                    : "text-neutral-500"
+                                }
+                              >
+                                {formatDateID(item.dueDate)}
+                                {overdue ? " · terlambat" : ""}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="flex shrink-0 items-center gap-1">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="text-xs"
+                            onClick={() =>
+                              setFormTarget({ mode: "edit", item })
+                            }
+                          >
+                            Ubah
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="text-xs text-red-600 hover:bg-red-50 hover:text-red-700"
+                            onClick={() => setPendingDelete(item)}
+                          >
+                            Hapus
+                          </Button>
+                        </div>
+                      </motion.li>
+                    );
+                  })}
+                </AnimatePresence>
               </ul>
             </Card>
           );

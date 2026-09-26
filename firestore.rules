@@ -10,8 +10,9 @@ rules_version = '2';
 //   solo tidak pernah mengevaluasi get()/akses field yang belum ada.
 // - Akses subcollection pakai get() pada path TETAP (induk) → untuk operasi
 //   list rules dievaluasi sekali (resource-independent), aman kuota.
-// - Klaim undangan: pasangan mengirim email cocok dengan request.auth.token.email
-//   hanya boleh menyentuh field partnerUid & coupleStatus di dokumen pemilik.
+// - Field 'coupleStatus' sengaja selalu ada di dokumen baru (user-service
+//   EMPTY_PROFILE) supaya ekspresi rules tidak pernah error "No such
+//   property" saat membandingkan dengan string.
 service cloud.firestore {
   match /databases/{database}/documents {
 
@@ -23,7 +24,15 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid == userId;
     }
 
-    // Pasangan TERTAUT — akses penuh (kolaborasi realtime dua arah).
+    // Email sudah dibuktikan milk pemohon lewat tautan verifikasi.
+    // Wajib untuk SEMUA operasi yang lintas akun (klaim undangan, unlink
+    // dua arah) karena email alone bukan bukti kepemilikan mailbox: siapa
+    // pun yang tahu alamat seseorang bisa mendaftar dengan alamat itu.
+    function isVerifiedEmail() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    // Pasangan TERTAUT — akses baca penuh.
     // resource = dokumen yang dibaca/ditulis (create → null, dijaga null-check).
     function isLinkedPartner() {
       return isSignedIn() && resource != null
@@ -32,17 +41,49 @@ service cloud.firestore {
 
     // Akun penerima UNDANGAN (email sama dengan partnerEmail di dokumen).
     // Berlaku untuk: baca profil (menemukan undangan via query) & klaim terbatas.
+    // Butuh email terverifikasi, lihat isVerifiedEmail().
     function isInvitee() {
-      return isSignedIn() && resource != null
+      return isVerifiedEmail() && resource != null
         && resource.data.partnerEmail == request.auth.token.email;
     }
 
+    /**
+     * Field profil yang BOLEH diubah pasangan tertaut.
+     *
+     * Sempit dengan sengaja. Pasangan adalah co-owner data pernikahan, bukan
+     * pemilik akun: dia boleh mengisi tanggal, lokasi, nama, dan total
+     * budget, tapi TIDAK boleh menukar siapa pemilik workspace.
+     *
+     * Field yang TIDAK ada di sini dan hanya boleh disentuh owner:
+     *   email         — identitas akun
+     *   partnerEmail  — siapa yang diundang
+     *   partnerUid    — siapa yang tertaut  (diklaim hanya lewat isInvitee)
+     *   linkedTo      — arah tautan akun sendiri
+     *   coupleStatus  — status undangan/tautan
+     *   fcmTokens     — token push milik AKUN itu (bukan data bridal)
+     *   createdAt
+     *
+     * `mergedFromUid`/`mergedAt` tetap boleh karena penanda idempoten merge
+     * ditulis pasangan saat menyalin datanya sendiri (couple-service).
+     */
+    function writesOnlySharedProfile() {
+      return request.resource.data.diff(resource.data).affectedKeys()
+        .hasOnly(['displayName', 'partnerName', 'weddingDate', 'venue',
+                  'totalBudget', 'mergedFromUid', 'mergedAt']);
+    }
+
     // Akses workspace via induk — untuk pemilik MAUPUN pasangan tertaut.
+    // Cek dua arah (resiprositas): target menunjuk ke pemohon DAN dokumen
+    // pemohon menunjuk balik. Tanpa resiprositas, pasangan bisa menulis
+    // partnerUid = <uid pihak ketiga> di dokumen pemilik dan pihak ketiga
+    // itu langsung mendapat akses penuh tanpa persetujuan siapa pun.
     function hasWorkspaceAccess(userId) {
       return isOwner(userId) || (
         isSignedIn()
         && get(/databases/$(database)/documents/users/$(userId)).data.partnerUid
            == request.auth.uid
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.linkedTo
+           == userId
       );
     }
 
@@ -51,22 +92,51 @@ service cloud.firestore {
       // Pemilik workspace / user solo: baca & tulis penuh.
       allow read, write: if isOwner(userId);
 
-      // Pasangan tertaut: penuh (edit profil, alokasi, totalBudget, fcmTokens).
-      allow read, write: if isLinkedPartner();
+      // Pasangan tertaut: BACA penuh…
+      allow read: if isLinkedPartner();
+
+      // … tapi TIDAK boleh menghapus dokumen profil. `write` di atas
+      // menutup delete untuk pasangan, sehingga hasWorkspaceAccess tetap
+      // bisa resolve get() dan kedua pihak tidak terkunci dari subcollection
+      // masing-masing.
+      // …dan TIDAK boleh menulis field di luar isSharedProfileField(),
+      // supaya tidak bisa menukar pemilik workspace.
+      allow update: if isLinkedPartner() && writesOnlySharedProfile();
 
       // Penerima undangan: baca profil ini — wajib untuk query
       // `users where partnerEmail == <email sendiri>` (auto-claim).
       allow read: if isInvitee();
 
       // …dan mengklaim tautan HANYA untuk dirinya sendiri, terbatas
-      // pada dua field tautan (tidak bisa mengubah data lain).
+      // pada dua field tautan, dan HANYA pada undangan yang masih hidup:
+      //   - partnerUid harus masih kosong (atau memang sudah dirinya),
+      //     supaya penerima undangan baru tidak bisa menggeser pasangan
+      //     yang sudah tertaut.
+      //   - coupleStatus harus "invited", supaya undangan yang sudah
+      //     dibatalkan atau sudah linked tidak bisa diklaim ulang.
       allow update: if isInvitee()
         && request.resource.data.partnerUid == request.auth.uid
+        && (resource.data.partnerUid == null
+            || resource.data.partnerUid == request.auth.uid)
+        && resource.data.coupleStatus == 'invited'
         && request.resource.data.diff(resource.data).affectedKeys()
              .hasOnly(['partnerUid', 'coupleStatus']);
 
-      // Pemilik boleh menautkan/menutup tautan dokumen pasangannya
-      // (dipakai unlink dua arah) — terbatas field tautan.
+      // Pasangan tertaut boleh MELEPAS tautannya: membersihkan field
+      // tautan di dokumen pemilik (couple-service.unlinkCouple).
+      // Syarat partnerUid == null pada hasil akhirnya membuat pasangan
+      // hanya bisa MENCABUT akses, tidak bisa menunjuk akses itu ke orang
+      // lain. Inilah satu-satunya jalan dari sisi pasangan yang boleh
+      // menyentuh partnerUid.
+      allow update: if isVerifiedEmail() && isLinkedPartner()
+        && request.resource.data.partnerUid == null
+        && request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(['partnerUid', 'partnerEmail', 'coupleStatus']);
+
+      // Pemilik boleh menutup tautan dokumen pasangannya (dipakai unlink
+      // dua arah) — terbatas field tautan. Tidak perlu email terverifikasi:
+      // dokumen yang dituju sudah menunjuk ke pemohon, jadi ini hanya
+      // membersihkan tautan milik sendiri, tanpa menyentuh data orang lain.
       allow update: if isSignedIn() && resource != null
         && resource.data.linkedTo == request.auth.uid
         && request.resource.data.diff(resource.data).affectedKeys()

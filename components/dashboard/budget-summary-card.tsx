@@ -8,6 +8,7 @@ import { BUDGET_LEVEL_MESSAGES } from "@/lib/constants";
 import { formatIDR } from "@/lib/format";
 import type { BudgetCategory } from "@/types";
 import { Card, CardTitle } from "@/components/ui/card";
+import { AnimatedValue } from "@/components/ui/animated-value";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ProgressBar } from "@/components/ui/progress-bar";
 import { CardSkeleton } from "@/components/ui/skeleton";
@@ -40,7 +41,12 @@ export function BudgetSummaryCard() {
       ) : (
         <div className="mt-4">
           <p className="text-2xl font-semibold tabular-nums text-neutral-900">
-            {formatIDR(stats.spent)}
+            {/* Angka ini paling sering berubah dari perangkat lain, jadi ia
+                ikut bergerak supaya mata langsung ke sini. */}
+            <AnimatedValue
+              value={stats.spent}
+              format={(value) => formatIDR(Number(value))}
+            />
             <span className="text-sm font-normal text-neutral-400">
               {" "}
               / {formatIDR(stats.allocated)}
@@ -66,7 +72,10 @@ export function BudgetSummaryCard() {
           <p className="mt-1 text-sm text-neutral-500">
             Sisa:{" "}
             <span className="font-medium tabular-nums text-neutral-700">
-              {formatIDR(stats.remaining)}
+              <AnimatedValue
+                value={stats.remaining}
+                format={(value) => formatIDR(Number(value))}
+              />
             </span>
           </p>
         </div>

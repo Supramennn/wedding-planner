@@ -52,7 +52,7 @@ export function Spinner({
 }
 
 /** Layar loading penuh (guard rute, first load). */
-export function FullScreenSpinner({ label = "Memuat…" }: { label?: string }) {
+export function FullScreenSpinner({ label = "Memuat" }: { label?: string }) {
   return (
     // Spinner adalah UI non-teks: butuh rasio 3:1 dari latar (WCAG 1.4.11).
     // neutral-400 hanya 2.4:1 di #fafafa, neutral-500 mencapai 4.5:1.

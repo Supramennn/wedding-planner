@@ -52,13 +52,19 @@ export async function updateChecklistItem(
   );
 }
 
+/**
+ * Tulis status selesai dengan nilai target eksplisit.
+ *
+ * Nilai target diterima sebagai argumen, bukan diturunkan dari `item`,
+ * supaya aman dipanggil berulang: dengan cara lama (`!item.isCompleted`),
+ * tap kedua sebelum snapshot tiba akan menulis nilai yang sama.
+ */
 export async function toggleChecklistItem(
   uid: string,
-  item: ChecklistItem
+  itemId: string,
+  isCompleted: boolean
 ): Promise<void> {
-  await updateDoc(doc(getDb(), checklistPath(uid), item.id), {
-    isCompleted: !item.isCompleted,
-  });
+  await updateDoc(doc(getDb(), checklistPath(uid), itemId), { isCompleted });
 }
 
 export async function deleteChecklistItem(

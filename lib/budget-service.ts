@@ -16,13 +16,24 @@ import type { Expense } from "@/types";
  * Foto struk disimpan terpisah di users/{uid}/receipts (lihat receipt-service).
  */
 
+/**
+ * Slug deterministik dari nama kategori, dipakai sebagai document id.
+ *
+ * PENTING: logika ini tidak boleh diubah ringan. Document id yang sudah
+ * tertulis di Firestore tidak ikut berubah, jadi mengubah aturan slug akan
+ * membuat dokumen budget lama terlantar dan alokasi kategorinya terpecah.
+ *
+ * Fallback ada karena nama kategori tanpa alnum (mis. "!!!") akan menjadi
+ * string kosong, dan document id kosong ditolak Firestore.
+ */
 export function categorySlug(categoryName: string): string {
-  return categoryName
+  const slug = categoryName
     .toLowerCase()
     .normalize("NFKD")
     .replace(/[^\w\s-]/g, "")
     .trim()
     .replace(/\s+/g, "-");
+  return slug || "lain-lain";
 }
 
 /** FR-12: set/edit total budget pernikahan (tersimpan di users/{uid}). */

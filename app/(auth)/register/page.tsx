@@ -13,6 +13,7 @@ import {
   isFirebaseConfigured,
 } from "@/lib/firebase";
 import { mapAuthError } from "@/lib/auth-errors";
+import { sendVerificationTo } from "@/lib/auth-verify";
 import { validateEmail, validatePassword } from "@/lib/validation";
 import { ensureUserProfile } from "@/lib/user-service";
 import { Button } from "@/components/ui/button";
@@ -54,6 +55,11 @@ export default function RegisterPage() {
       await ensureUserProfile(credential.user, {
         displayName: name.trim(),
       });
+      // Kirim email verifikasi di background. Kegagalan di sini TIDAK
+      // membatalkan pendaftaran: verifikasi hanya dibutuhkan untuk klaim
+      // undangan pasangan, bukan untuk memakai aplikasi. User tetap bisa
+      // mengirim ulang kapan saja dari Pengaturan.
+      sendVerificationTo(credential.user).catch(() => {});
       // Destinasi (onboarding utk user baru) ditentukan GuestGuard (FR-02).
     } catch (error) {
       setFormError(mapAuthError(error));

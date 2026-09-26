@@ -122,6 +122,65 @@ function report(ok, label, detail = "") {
 
 const DENY_CODES = new Set(["permission-denied", "storage/unauthorized"]);
 
+/**
+ * Tandai akun uji sebagai email terverifikasi.
+ *
+ * Diperlukan sejak rules mewajibkan `email_verified` untuk klaim undangan:
+ * tanpa ini, semua skenario klaim akan ditolak karena akun Auth Emulator
+ * dibuat dengan emailVerified=false.
+ *
+ * - EMULATOR: pakai REST API Auth Emulator (tidak ada email sungguhan yang
+ *   bisa dikirim), lalu refresh ID token di sisi klien.
+ * - PROYEK ASLI: tidak ada jalur otomatis. Skenario yang bergantung pada
+ *   verifikasi akan reported SKIP, bukan diam-diam dianggap lulus.
+ */
+let verificationAvailable = true;
+
+async function markVerified(credential) {
+  if (!verificationAvailable) return false;
+  try {
+    if (useEmulator) {
+      // Endpoint Auth Emulator untuk menandai user terverifikasi. Butuh
+      // path /v1/projects/{projectId}/ dan header Bearer owner.
+      const response = await fetch(
+        "http://127.0.0.1:9099/identitytoolkit.googleapis.com/v1/projects/demo-wedplan/accounts:update?key=demo-api-key",
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            authorization: "Bearer owner",
+          },
+          body: JSON.stringify({
+            localId: credential.user.uid,
+            emailVerified: true,
+          }),
+        }
+      );
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    } else {
+      // Proyek asli: coba picu email verifikasi sungguhan.
+      await credential.user.getIdToken(true);
+    }
+    // Dua hal terpisah yang harus keduanya terjadi:
+    // - reload() menyegarkan PROFIL lokal (User.emailVerified).
+    // - getIdToken(true) menyegarkan TOKEN, yang dibaca rules lewat
+    //   request.auth.token.email_verified.
+    // Kalau hanya reload(), rules masih melihat token lama.
+    await credential.user.reload();
+    await credential.user.getIdToken(true);
+    const verified = credential.user.emailVerified;
+    if (!verified) verificationAvailable = false;
+    return verified;
+  } catch {
+    verificationAvailable = false;
+    return false;
+  }
+}
+
+function skip(label, reason) {
+  console.log(`[SKIP] ${label} — ${reason}`);
+}
+
 async function expectDenied(label, promise) {
   try {
     await promise;
@@ -178,7 +237,9 @@ await expectAllowed(
     venue: "Venue Uji",
     partnerEmail: emailB,
     partnerUid: null,
-    coupleStatus: null,
+    // PENTING: aplikasi menulis coupleStatus "invited" (couple-card
+    // handleInvite), dan rules mensyaratkan nilai itu untuk klaim.
+    coupleStatus: "invited",
     linkedTo: null,
     createdAt: stamp,
   })
@@ -326,19 +387,19 @@ await setDoc(doc(db, "users", uidC), {
   createdAt: stamp,
 });
 
-// --- 2. B menemukan undangan via query partnerEmail -----------------------
+// --- 2. B belum verifikasi: tidak boleh menemukan/membaca undangan -------
+// Email B memang ada di partnerEmail A, tapi B BELUM memverifikasi
+// address-nya. Semua akses lintas akun harus tertutup sampai diaverify.
 await signInWithEmailAndPassword(auth, emailB, PASSWORD);
-await expectValue(
-  "B menemukan undangan via query where partnerEmail == email B",
+await expectDenied(
+  "B (belum verifikasi) tidak bisa query undangan via partnerEmail",
   getDocs(
     query(collection(db, "users"), where("partnerEmail", "==", emailB))
-  ),
-  (snapshot) => snapshot.docs.some((entry) => entry.id === uidA)
+  )
 );
-await expectValue(
-  "B membaca profil A (izin undangan, untuk klaim)",
-  getDoc(doc(db, "users", uidA)),
-  (snapshot) => snapshot.exists() && snapshot.data().weddingDate === "2030-01-01"
+await expectDenied(
+  "B (belum verifikasi) tidak bisa membaca profil A",
+  getDoc(doc(db, "users", uidA))
 );
 
 // --- 3. SEBELUM klaim: subcollection A tertutup untuk B -------------------
@@ -355,6 +416,48 @@ await expectDenied(
     isCompleted: false,
     createdAt: stamp,
   })
+);
+
+// --- 4a. GERBANG VERIFIKASI (#2) ------------------------------------------
+// Inti skenario: B sudah login dengan email yang PERSIS diundang, tapi
+// email belum terverifikasi. Menulis partnerUid di dokumen A harus ditolak,
+// sebab mengetahui alamat email seseorang tidak boleh cukup untuk
+// mengambil alih data pernikahan mereka.
+await expectDenied(
+  "B belum verifikasi: mengklaim (partnerUid di dokumen A)",
+  setDoc(
+    doc(db, "users", uidA),
+    { partnerUid: uidB, coupleStatus: "linked" },
+    { merge: true }
+  )
+);
+
+const bVerified = await markVerified(credB);
+if (!bVerified) {
+  skip(
+    "Skenario klaim undangan",
+    "email tidak bisa diverifikasi otomatis pada mode ini. Jalankan dengan mode emulator."
+  );
+  process.exit(1);
+}
+
+// Login ulang supaya ID token berisi email_verified = true, sama seperti
+// pengguna yang verifikasi lalu membuka ulang aplikasi.
+await signOut(auth);
+await signInWithEmailAndPassword(auth, emailB, PASSWORD);
+
+await expectValue(
+  "B (email terverifikasi) menemukan undangan via query partnerEmail",
+  getDocs(
+    query(collection(db, "users"), where("partnerEmail", "==", emailB))
+  ),
+  (snapshot) => snapshot.docs.some((entry) => entry.id === uidA)
+);
+await expectValue(
+  "B (email terverifikasi) membaca profil A untuk klaim",
+  getDoc(doc(db, "users", uidA)),
+  (snapshot) =>
+    snapshot.exists() && snapshot.data().weddingDate === "2030-01-01"
 );
 
 // --- 4. Klaim tautan (dua langkah, sama seperti couple-service) -----------
@@ -513,6 +616,89 @@ await expectAllowed(
   setDoc(doc(db, "users", uidA), { totalBudget: 250_000_000 }, { merge: true })
 );
 
+// --- 7b. PASANGAN TIDAK BOLEH MENUKAR PEMILIK WORKSPACE (#3) -------------
+// B adalah co-owner DATA pernikahan, bukan pemilik akun. Dia boleh
+// mengisi tanggal/lokasi/nama/budget, tapi tidak boleh menunjuk ulang siapa
+// yang punya akses. Tanpa aturan ini, B bisa menulis partnerUid = <uid C>
+// di dokumen A dan C langsung mendapat akses penuh tanpa persetujuan siapa pun.
+await expectDenied(
+  "B menunjuk partnerUid di dokumen A ke akun C (escalasi akses)",
+  updateDoc(doc(db, "users", uidA), { partnerUid: uidC })
+);
+await expectDenied(
+  "B menulis partnerUid menunjuk ke akun lain yang sudah punya tautan sendiri",
+  updateDoc(doc(db, "users", uidA), { partnerUid: uidB, linkedTo: uidA })
+);
+await expectDenied(
+  "B menulis ulang partnerEmail di dokumen A (mengundang pihak lain)",
+  updateDoc(doc(db, "users", uidA), { partnerEmail: emailC })
+);
+await expectDenied(
+  "B mengganti email akun A di dokumen A",
+  updateDoc(doc(db, "users", uidA), { email: "dipivot@example.com" })
+);
+await expectDenied(
+  "B menulis fcmTokens di dokumen A (token push milik akun A)",
+  updateDoc(doc(db, "users", uidA), { fcmTokens: ["token-palsu"] })
+);
+await expectDenied(
+  "B menghapus dokumen profil A",
+  deleteDoc(doc(db, "users", uidA))
+);
+await expectValue(
+  "Dokumen A utuh setelah semua upaya penulisan ilegal",
+  getDoc(doc(db, "users", uidA)),
+  (snapshot) =>
+    snapshot.exists() &&
+    snapshot.data().partnerUid === uidB &&
+    snapshot.data().email === emailA &&
+    snapshot.data().partnerEmail === emailB
+);
+
+// B tetap boleh MELEPAS tautan (ada tombolnya di Pengaturan): partnerUid
+// harus menjadi null, dan hanya field tautan yang boleh disentuh. Ini bukan
+// serangan, jadi harusnya ALLOWED.
+await expectAllowed(
+  "B melepas tautan: membersihkan partnerUid/partnerEmail di dokumen A",
+  setDoc(
+    doc(db, "users", uidA),
+    { partnerUid: null, partnerEmail: null, coupleStatus: null },
+    { merge: true }
+  )
+);
+await expectAllowed(
+  "B melepas tautan: membersihkan linkedTo di dokumen sendiri",
+  setDoc(
+    doc(db, "users", uidB),
+    { linkedTo: null, coupleStatus: null },
+    { merge: true }
+  )
+);
+await expectDenied(
+  "B (sudah lepas) tidak bisa menyentuh dokumen A lagi",
+  setDoc(
+    doc(db, "users", uidA),
+    { partnerUid: uidC, coupleStatus: "linked" },
+    { merge: true }
+  )
+);
+// Beralih kembali ke status tertaut (sebagai pemilik A) supaya skenario
+// sisa tetap bermakna.
+await signOut(auth);
+await signInWithEmailAndPassword(auth, emailA, PASSWORD);
+await setDoc(
+  doc(db, "users", uidA),
+  { partnerEmail: emailB, partnerUid: uidB, coupleStatus: "linked" },
+  { merge: true }
+);
+await signOut(auth);
+await signInWithEmailAndPassword(auth, emailB, PASSWORD);
+await setDoc(
+  doc(db, "users", uidB),
+  { linkedTo: uidA, coupleStatus: "linked" },
+  { merge: true }
+);
+
 // Koleksi baru (fitur tamu & item persiapan) juga mengikuti aturan workspace.
 const guestByB = doc(collection(db, "users", uidA, "guests"));
 await expectAllowed(
@@ -574,8 +760,16 @@ await expectAllowed(
 );
 
 // --- 9. C (pihak ketiga) tetap terkunci total -----------------------------
+// C diverifikasi dulu. Kalau tidak, semua penolakan di bawah ini bisa
+// dijelaskan oleh "email belum verifikasi" dan bukan oleh "bukan pasangan",
+// sehingga tesnya tidak lagi membuktikan aturanKolaborasi.
 await signOut(auth);
 await signInWithEmailAndPassword(auth, emailC, PASSWORD);
+if (await markVerified(credC)) {
+  await signOut(auth);
+  await signInWithEmailAndPassword(auth, emailC, PASSWORD);
+}
+
 await expectDenied(
   "C membaca profil A",
   getDoc(doc(db, "users", uidA))
@@ -631,6 +825,55 @@ await expectAllowed(
   uploadBytes(ref(storage, `users/${uidC}/receipts/couple-test-c.jpg`), bytes, {
     contentType: "image/jpeg",
   })
+);
+
+// --- 9b. RESIPROSITAS (#3): satu arah saja tidak cukup --------------------
+// Di sini A (pemilik) menulis partnerUid = C di dokumennya sendiri. Dulu ini
+// sudah cukup untuk memberi C akses penuh ke semua subcollection A.
+// Sekarang rules menuntut dua arah: dokumen C juga harus menunjuk balik ke A
+// lewat linkedTo. Karena C tidak pernah menaut, aksesnya tetap gugur.
+await signOut(auth);
+await signInWithEmailAndPassword(auth, emailA, PASSWORD);
+await expectAllowed(
+  "A (pemilik) menulis partnerUid = C di dokumennya sendiri",
+  setDoc(
+    doc(db, "users", uidA),
+    { partnerUid: uidC, coupleStatus: "linked" },
+    { merge: true }
+  )
+);
+await signOut(auth);
+await signInWithEmailAndPassword(auth, emailC, PASSWORD);
+await expectDenied(
+  "C membaca checklist A (partnerUid satu arah, tanpa linkedTo balik)",
+  getDocs(collection(db, "users", uidA, "checklist"))
+);
+await expectDenied(
+  "C menulis checklist A (partnerUid satu arah)",
+  addDoc(collection(db, "users", uidA, "checklist"), {
+    title: "Nyasar lewat resiprositas",
+    category: "Lain-lain",
+    dueDate: "",
+    isCompleted: false,
+    createdAt: stamp,
+  })
+);
+await expectDenied(
+  "C membaca budget A (partnerUid satu arah)",
+  getDoc(doc(db, "users", uidA, "budget", "katering"))
+);
+
+// Kembalikan workspace ke kondisi semula supaya skenario setelahnya
+// (yang menguji storage + unlink) tetap bermakna.
+await signOut(auth);
+await signInWithEmailAndPassword(auth, emailA, PASSWORD);
+await expectAllowed(
+  "A mengembalikan partnerUid ke B (workspace pulih)",
+  setDoc(
+    doc(db, "users", uidA),
+    { partnerEmail: emailB, partnerUid: uidB, coupleStatus: "linked" },
+    { merge: true }
+  )
 );
 
 // --- 10. Arah kedua storage + Unlink oleh A → akses B gugur ---------------

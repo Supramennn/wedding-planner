@@ -8,6 +8,10 @@
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
+    "check:text": "node scripts/check-text.mjs .",
+    "test": "node --experimental-strip-types --disable-warning=ExperimentalWarning --import ./scripts/ts-alias.mjs --test \"lib/**/*.test.ts\"",
+    "test:rules": "node scripts/test-couple-rules.mjs",
+    "verify": "npm run check:text && npm run lint && npm run typecheck && npm run test",
     "icons": "node scripts/generate-icons.mjs"
   },
   "dependencies": {

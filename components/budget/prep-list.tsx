@@ -1,11 +1,14 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
 import { useAuth } from "@/lib/hooks/auth-context";
 import { useCollection } from "@/lib/hooks/use-collection";
+import { useOptimisticToggle } from "@/lib/hooks/use-optimistic-toggle";
 import { prepPath } from "@/lib/collection-paths";
 import { prepStats } from "@/lib/aggregate";
 import { formatIDR, parseAmount } from "@/lib/format";
+import { listItemVariants } from "@/lib/motion";
 import {
   addPrepItem,
   deletePrepItem,
@@ -167,10 +170,14 @@ export function PrepList({
   const [busyId, setBusyId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
-  const stats = useMemo(() => prepStats(items), [items]);
+  // Toggle optimistis, sama seperti checklist: centang & angka ringkasan
+  // berubah seketika, dilepas begitu snapshot menyusul.
+  const { liveItems, toggle } = useOptimisticToggle(items, "isDone");
+
+  const stats = useMemo(() => prepStats(liveItems), [liveItems]);
   const sorted = useMemo(
-    () => [...items].sort(sortPrepItems),
-    [items]
+    () => [...liveItems].sort(sortPrepItems),
+    [liveItems]
   );
 
   async function runAction(id: string | null, action: () => Promise<void>) {
@@ -255,59 +262,77 @@ export function PrepList({
         />
       ) : (
         <ul className="mt-4 divide-y divide-neutral-100">
-          {sorted.map((item) => (
-            <li key={item.id} className="flex items-start gap-3 py-3">
-              <input
-                type="checkbox"
-                checked={item.isDone}
-                disabled={busyId === item.id}
-                onChange={() =>
-                  workspaceUid &&
-                  runAction(item.id, () => togglePrepItem(workspaceUid, item))
-                }
-                aria-label={`Tandai sudah disiapkan: ${item.name}`}
-                className="mt-0.5 size-5 shrink-0 rounded accent-rose-600 disabled:opacity-50"
-              />
-
-              <div className="min-w-0 flex-1">
-                <p
-                  className={`text-sm ${
+          <AnimatePresence initial={false}>
+            {sorted.map((item) => (
+              <motion.li
+                key={item.id}
+                variants={listItemVariants}
+                initial="initial"
+                animate="animate"
+                exit="exit"
+                className="flex items-start gap-3 py-3"
+              >
+                <input
+                  type="checkbox"
+                  checked={item.isDone}
+                  onChange={() =>
+                    workspaceUid &&
+                    toggle(
+                      item,
+                      (id, next) => togglePrepItem(workspaceUid, id, next),
+                      () => setActionError(ACTION_ERROR)
+                    )
+                  }
+                  aria-label={
                     item.isDone
-                      ? "text-neutral-400 line-through"
-                      : "text-neutral-800"
-                  }`}
-                >
-                  {item.name}
-                </p>
-                <div className="mt-1 flex flex-wrap items-center gap-2">
-                  <Badge tone="neutral">{item.categoryName}</Badge>
-                  <span className="text-xs tabular-nums text-neutral-500">
-                    {formatIDR(Number(item.plannedAmount) || 0)}
-                  </span>
-                  {item.isDone && <Badge tone="emerald">Sudah disiapkan</Badge>}
-                </div>
-              </div>
+                      ? `Batalkan sudah disiapkan: ${item.name}`
+                      : `Tandai sudah disiapkan: ${item.name}`
+                  }
+                  className="mt-0.5 size-5 shrink-0 cursor-pointer rounded accent-rose-600"
+                />
 
-              <div className="flex shrink-0 items-center gap-1">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="text-xs"
-                  onClick={() => setFormTarget({ mode: "edit", item })}
-                >
-                  Ubah
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="text-xs text-red-600 hover:bg-red-50 hover:text-red-700"
-                  onClick={() => setPendingDelete(item)}
-                >
-                  Hapus
-                </Button>
-              </div>
-            </li>
-          ))}
+                <div className="min-w-0 flex-1">
+                  <p
+                    className={`text-sm ${
+                      item.isDone
+                        ? "text-neutral-400 line-through"
+                        : "text-neutral-800"
+                    }`}
+                  >
+                    {item.name}
+                  </p>
+                  <div className="mt-1 flex flex-wrap items-center gap-2">
+                    <Badge tone="neutral">{item.categoryName}</Badge>
+                    <span className="text-xs tabular-nums text-neutral-500">
+                      {formatIDR(Number(item.plannedAmount) || 0)}
+                    </span>
+                    {item.isDone && (
+                      <Badge tone="emerald">Sudah disiapkan</Badge>
+                    )}
+                  </div>
+                </div>
+
+                <div className="flex shrink-0 items-center gap-1">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="text-xs"
+                    onClick={() => setFormTarget({ mode: "edit", item })}
+                  >
+                    Ubah
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="text-xs text-red-600 hover:bg-red-50 hover:text-red-700"
+                    onClick={() => setPendingDelete(item)}
+                  >
+                    Hapus
+                  </Button>
+                </div>
+              </motion.li>
+            ))}
+          </AnimatePresence>
         </ul>
       )}
 

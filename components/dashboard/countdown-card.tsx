@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useAuth } from "@/lib/hooks/auth-context";
 import { daysUntil, formatDateID } from "@/lib/format";
 import { Card, CardTitle } from "@/components/ui/card";
+import { AnimatedValue } from "@/components/ui/animated-value";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
 
@@ -46,14 +47,18 @@ export function CountdownCard() {
       ) : (
         <div className="mt-3">
           <p className="text-4xl font-semibold tabular-nums text-rose-600">
-            {days > 0 ? days : Math.abs(days)}
-            <span className="ml-2 text-sm font-medium text-neutral-500">
-              {days > 0
-                ? "hari lagi"
-                : days === 0
-                  ? "hari ini hari-H!"
-                  : "hari sejak hari-H"}
-            </span>
+            {/* Angka ikut bergerak kalau berubah, jadi saat countdown
+                bergeser user tahu itu yang baru saja berubah. */}
+            {days === 0 ? (
+              <span className="text-2xl">Hari-H kamu hari ini</span>
+            ) : (
+              <AnimatedValue value={days > 0 ? days : Math.abs(days)} />
+            )}
+            {days !== 0 && (
+              <span className="ml-2 text-sm font-medium text-neutral-500">
+                {days > 0 ? "hari lagi" : "hari sejak hari-H"}
+              </span>
+            )}
           </p>
           <p className="mt-2 text-sm text-neutral-600">
             {formatDateID(weddingDate, "long")}

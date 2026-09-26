@@ -80,7 +80,39 @@ Selama `.env.local` masih kosong, aplikasi tetap bisa dibuka — semua halaman m
 | `npm run dev` | Dev server (`next dev --webpack`) |
 | `npm run build` / `npm start` | Build produksi / jalankan hasil build |
 | `npm run lint` / `npm run typecheck` | ESLint / TypeScript `--noEmit` |
+| `npm run test` | Unit test (`node:test`, tanpa dependensi baru) |
+| `npm run verify` | `check:text` + `lint` + `typecheck` + `test` (satu pintu untuk CI) |
+| `npm run test:rules` | Uji security rules (butuh emulator, lihat bagian 6) |
 | `npm run icons` | Regenerate ikon PWA dari `scripts/generate-icons.mjs` |
+
+### Unit test
+
+Memakai `node:test` bawaan Node, **tanpa paket test runner tambahan**. Alasannya
+proyek ini sengaja mem-pin `@types/node@^20`; paket test runner populer
+meminta versi yang lebih baru dan memaksa dependensi dinaikkan.
+
+Dua file pembantu:
+
+- `scripts/ts-alias.mjs` — mendaftarkan resolve hook (dipakai lewat `--import`).
+- `scripts/ts-resolver.mjs` — menerjemahkan alias tsconfig `@/...` ke path
+  nyata dan menambahkan ekstensi `.ts`, karena `node --test` tidak membaca
+  `paths` di `tsconfig.json`.
+
+File test tinggal `*.test.ts` di samping modul yang diuji (`lib/format.test.ts`
+menguji `lib/format.ts`, dan seterusnya). Cakupannya sengaja fokus ke logika
+yang menentukan angka yang dilihat user, plus aturan yang mudah diubah tanpa
+sengaja:
+
+- `format` — format Rupiah/tanggal, guard NaN dan divide-by-zero.
+- `aggregate` — statistik checklist/budget/tamu/prep, pengelompokan kategori.
+- `constants` — ambang FR-16 (hijau <70%, kuning 70-99%, merah >=100%).
+- `budget-service` — `categorySlug`, dikunci agar tidak berubah diam-diam dan
+  merusak dokumen budget yang sudah ada.
+- `optimistic-toggle` — aturan override centang realtime, termasuk kasus
+  pasangan mengubah item yang sama.
+
+> Node 22.6+ dibutuhkan untuk flag `--experimental-strip-types` yang dipakai
+> `npm test`.
 
 ## 4. Struktur Proyek
 
@@ -173,7 +205,14 @@ users/{userId}/reminderLog/{logId}      (tulis HANYA Admin SDK server; client DE
 
 ## 6. Keamanan (Security Rules) & Uji Isolasi
 
-**Prinsip: owner-only, default deny.** `firestore.rules` hanya membuka `users/{ownUserId}/**` — path lain otomatis ditolak. Untuk **kolaborasi Phase 2**, pasangan tertaut (`partnerUid == request.auth.uid`, dicek via `get()` ke dokumen induk — path tetap, tervalidasi sekali per list) mendapat akses penuh ke workspace-nya; penerima undangan hanya bisa membaca profil ber-`partnerEmail` sama dengan token emailnya dan mengklaim dua field tautan. Subcollection baru `guests`, `prepItems`, dan `receipts` (struk) ikut aturan `hasWorkspaceAccess` yang sama. `storage.rules` (kini **tidak dipakai aplikasi** — struk di Firestore) tetap memisahkan `read` / `write` (maks 5 MB) / `delete` dengan cek pasangan **dua arah** via `firestore.get()`, tetap teruji di emulator bila kelak di-deploy ulang.
+**Prinsip: owner-only, default deny.** `firestore.rules` hanya membuka `users/{ownUserId}/**` — path lain otomatis ditolak. Untuk **kolaborasi Phase 2**, pasangan tertaut (`partnerUid == request.auth.uid`, dicek via `get()` ke dokumen induk — path tetap, tervalidasi sekali per list) mendapat akses baca penuh ke workspace-nya, dan **hanya boleh mengubah field data pernikahan** (`displayName`, `partnerName`, `weddingDate`, `venue`, `totalBudget`, plus penanda merge). Field kepemilikan/relasi (`email`, `partnerEmail`, `partnerUid`, `linkedTo`, `coupleStatus`, `fcmTokens`) **tidak boleh disentuh pasangan** — kalau boleh, pasangan bisa menunjuk `partnerUid` ke akun ketiga dan memberi akses penuh tanpa persetujuan. `hasWorkspaceAccess` juga cek **dua arah** (target menunjuk ke pemohon DAN dokumen pemohon menunjuk balik), jadi satu arah saja tidak cukup.
+
+**Verifikasi email untuk klaim undangan.** `isInvitee()` (izin membaca dokumen undangan & mengklaim) mensyaratkan `request.auth.token.email_verified == true`, dan klaim juga mensyaratkan undangan masih hidup (`coupleStatus == 'invited'`) serta `partnerUid` belum dipakai akun lain. Tanpa verifikasi, siapa pun yang **tahu** alamat email pasangan bisa mendaftar dengan alamat itu dan mengambil alih data pernikahan mereka. Verifikasi **tidak** mengunci user: seluruh aplikasi tetap bisa dipakai dengan
+email unverified, hanya operasi lintas akun yang memblokirnya. Email verifikasi
+dikirim otomatis saat daftar; tautan verifikasinya diabaikan kalau user sudah
+terverifikasi.
+
+Penerima undangan hanya bisa membaca profil ber-`partnerEmail` sama dengan token emailnya **dan sudah terverifikasi**, lalu mengklaim dua field tautan. Subcollection baru `guests`, `prepItems`, dan `receipts` (struk) ikut aturan `hasWorkspaceAccess` yang sama. `storage.rules` (kini **tidak dipakai aplikasi** — struk di Firestore) tetap memisahkan `read` / `write` (maks 5 MB) / `delete` dengan cek pasangan **dua arah** via `firestore.get()`, tetap teruji di emulator bila kelak di-deploy ulang.
 
 > Rules dipisah per operasi karena `request.resource` bernilai `null` saat READ/DELETE — menggabungkannya dengan `request.resource.size` akan menolak operasi tersebut.
 
@@ -196,7 +235,22 @@ npx firebase-tools emulators:exec --only auth,firestore,storage \
   --project demo-wedplan "node scripts/test-rules-isolation.mjs --emulator && node scripts/test-couple-rules.mjs --emulator"
 ```
 
-Skrip **`test-couple-rules.mjs`** (Phase 2) menambah **49 skenario** kolaborasi & merge: temukan undangan via query email sendiri → klaim dua langkah → **simulasi merge** (isi kekosongan profil, salin checklist dengan dedup — 2 dari 3 item, gabung budget per-slug, penanda idempoten) → pasangan membaca/menulis checklist, budget, profil, **daftar tamu, item persiapan & struk (`receipts`)** workspace — pasangan membaca struk A dengan verifikasi field `bytes` terbaca, dan menulis struk baru ke workspace (jalur merge) — semua `PASS`; upload struk ke folder pasangan via storage rules juga `PASS`; arah storage `linkedTo` (pemilik membaca struk lama pasangan `PASS`, gugur setelah unlink); pihak ketiga C ditolak total termasuk upaya klaim, akses koleksi baru **dan baca struk**; setelah unlink oleh pemilik, akses pasangan gugur kembali sementara data miliknya sendiri tetap terbaca. Total kedua skrip: **59 skenario**.
+> Windows tanpa Java di `PATH`: arahkan `JAVA_HOME` ke JRE portable di dalam
+> repo (folder `.tools/`, sudah di-gitignore), lalu tambahkan `bin`-nya ke
+> `PATH`. Jalankan `npx firebase-tools` bila CLI belum terpasang global.
+
+Skrip **`test-couple-rules.mjs`** (Phase 2) menambah skenario kolaborasi & merge. Dutanya **verifikasi email** lebih dulu: email akun harus terverifikasi sebelum boleh mengklaim undangan, jadi skrip menandai akun uji terverifikasi lewat API emulator sebelum menjalankan skenario klaim.
+
+Skenario yang dibuktikan (semua `PASS` pada jalur emulator):
+
+- **Gerbang verifikasi** — akun dengan email yang diundang tapi belum verifikasi: **ditolak** saat query undangan, membaca profil, maupun mengklaim (`partnerUid`). Setelah verifikasi, ketiganya boleh.
+- **Merge** — temukan undangan via query → klaim dua langkah → simulasi merge (isi kekosongan profil, salin checklist dengan dedup, gabung budget per-slug, penanda idempoten) → pasangan membaca/menulis checklist, budget, profil, daftar tamu, item persiapan, dan struk workspace.
+- **Pasangan tidak boleh menukar pemilik workspace** — pasangan tertaut yang mencoba menulis `partnerUid` menunjuk akun lain, menulis ulang `partnerEmail`, mengganti `email`, menulis `fcmTokens`, atau menghapus dokumen profil: **semua DENY**. Pasangan tetap boleh mengubah `venue`, `weddingDate`, `totalBudget`, dan boleh **lepas tautan** (membersihkan field tautan dengan `partnerUid` harus null).
+- **Resiprositas** — pemilik yang menulis `partnerUid` satu arah ke akun ketiga TIDAK memberi akses; akun ketiga juga harus menunjuk balik lewat `linkedTo`.
+- **Pihak ketiga tetap terkunci** — C (pihak ketiga, sudah diverifikasi) tetap ditolak total: baca/tulis profil, subcollection, storage, upaya klaim, dan akses lewat `partnerUid` satu arah.
+- **Storage dan unlink** — upload struk ke folder pasangan `PASS`, arah `linkedTo`, dan setelah unlink oleh pemilik akses pasangan gugur sementara data miliknya sendiri tetap terbaca.
+
+Keseluruhan skrip (`test-rules-isolation.mjs` + `test-couple-rules.mjs`) dijalankan lewat emulator dan semuanya `PASS`.
 
 **Jalur B — proyek asli (setelah rules di-deploy):**
 

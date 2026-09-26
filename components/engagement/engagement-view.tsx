@@ -1,12 +1,15 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
 import { useAuth } from "@/lib/hooks/auth-context";
 import { useCollection } from "@/lib/hooks/use-collection";
+import { useOptimisticToggle } from "@/lib/hooks/use-optimistic-toggle";
 import { checklistPath } from "@/lib/collection-paths";
 import { checklistStats, groupChecklistByCategory } from "@/lib/aggregate";
 import { ENGAGEMENT_CATEGORIES } from "@/lib/constants";
 import { daysUntil, formatDateID } from "@/lib/format";
+import { listItemVariants } from "@/lib/motion";
 import {
   deleteChecklistItem,
   toggleChecklistItem,
@@ -49,9 +52,13 @@ export function EngagementView() {
   const [seeding, setSeeding] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
 
+  // Toggle optimistis, sama persis dengan menu Checklist supaya kedua
+  // menu tidak berperilaku berbeda.
+  const { liveItems, toggle } = useOptimisticToggle(items, "isCompleted");
+
   const engagementItems = useMemo(
-    () => items.filter((item) => item.phase === "engagement"),
-    [items]
+    () => liveItems.filter((item) => item.phase === "engagement"),
+    [liveItems]
   );
   const groups = useMemo(
     () => groupChecklistByCategory(engagementItems, ENGAGEMENT_CATEGORIES),
@@ -176,27 +183,41 @@ export function EngagementView() {
               />
 
               <ul className="mt-3 divide-y divide-neutral-100">
-                {group.items.map((item) => {
-                  const overdue =
-                    !item.isCompleted &&
-                    daysUntil(item.dueDate) !== null &&
-                    (daysUntil(item.dueDate) as number) < 0;
+                <AnimatePresence initial={false}>
+                  {group.items.map((item) => {
+                    const overdue =
+                      !item.isCompleted &&
+                      daysUntil(item.dueDate) !== null &&
+                      (daysUntil(item.dueDate) as number) < 0;
 
-                  return (
-                    <li key={item.id} className="flex items-start gap-3 py-3">
-                      <input
-                        type="checkbox"
-                        checked={item.isCompleted}
-                        disabled={busyId === item.id}
-                        onChange={() =>
-                          workspaceUid &&
-                          runAction(item.id, () =>
-                            toggleChecklistItem(workspaceUid, item)
-                          )
-                        }
-                        aria-label={`Tandai selesai: ${item.title}`}
-                        className="mt-0.5 size-5 shrink-0 rounded accent-rose-600 disabled:opacity-50"
-                      />
+                    return (
+                      <motion.li
+                        key={item.id}
+                        variants={listItemVariants}
+                        initial="initial"
+                        animate="animate"
+                        exit="exit"
+                        className="flex items-start gap-3 py-3"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={item.isCompleted}
+                          onChange={() =>
+                            workspaceUid &&
+                            toggle(
+                              item,
+                              (id, next) =>
+                                toggleChecklistItem(workspaceUid, id, next),
+                              () => setActionError(ACTION_ERROR)
+                            )
+                          }
+                          aria-label={
+                            item.isCompleted
+                              ? `Batalkan selesai: ${item.title}`
+                              : `Tandai selesai: ${item.title}`
+                          }
+                          className="mt-0.5 size-5 shrink-0 cursor-pointer rounded accent-rose-600"
+                        />
 
                       <div className="min-w-0 flex-1">
                         <p
@@ -245,9 +266,10 @@ export function EngagementView() {
                           Hapus
                         </Button>
                       </div>
-                    </li>
-                  );
-                })}
+                      </motion.li>
+                    );
+                  })}
+                </AnimatePresence>
               </ul>
             </Card>
           );

@@ -31,7 +31,9 @@ const VARIANT_CLASSES: Record<ButtonVariant, string> = {
 };
 
 const SIZE_CLASSES: Record<ButtonSize, string> = {
-  sm: "min-h-10 px-3 text-sm",
+  // min-h-11 = 44px untuk semua ukuran. Versi lama memakai min-h-10 (40px)
+  // untuk size sm padahal komentarnya menjanjikan target sentuh 44px.
+  sm: "min-h-11 px-3 text-sm",
   md: "min-h-11 px-4 text-sm",
   lg: "min-h-12 px-5 text-base",
 };

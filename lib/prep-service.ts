@@ -39,14 +39,18 @@ export async function updatePrepItem(
   );
 }
 
-/** Centang/batal centang "sudah disiapkan" (toggle optimis dari UI). */
+/**
+ * Centang/batal centang "sudah disiapkan" dengan nilai target eksplisit.
+ * Nilai target jadi argumen supaya aman dipanggil berulang; kalau
+ * diturunkan dari `item`, tap kedua sebelum snapshot tiba akan menulis
+ * nilai yang sama.
+ */
 export async function togglePrepItem(
   uid: string,
-  item: Pick<PrepItem, "id" | "isDone">
+  itemId: string,
+  isDone: boolean
 ): Promise<void> {
-  await updateDoc(doc(getDb(), prepPath(uid), item.id), {
-    isDone: !item.isDone,
-  });
+  await updateDoc(doc(getDb(), prepPath(uid), itemId), { isDone });
 }
 
 export async function deletePrepItem(

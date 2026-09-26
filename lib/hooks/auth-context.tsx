@@ -12,6 +12,7 @@ import {
 import { onAuthStateChanged, signOut, type User } from "firebase/auth";
 import { doc, onSnapshot } from "firebase/firestore";
 import { getDb, getFirebaseAuth, isFirebaseConfigured } from "@/lib/firebase";
+import { refreshAuthClaims } from "@/lib/auth-verify";
 import { tryAutoClaimInvite } from "@/lib/couple-service";
 import type { UserProfile } from "@/types";
 
@@ -45,6 +46,20 @@ interface AuthContextValue {
   profileLoading: boolean;
   /** true bila seluruh field profil (termasuk weddingDate) sudah terisi. */
   isOnboarded: boolean;
+  /**
+   * true bila alamat email sudah diverifikasi.
+   *
+   * Dipisah dari `user.emailVerified` supaya perubahan status bisa
+   * memicu re-render: `onAuthStateChanged` tidak memicu event saat
+   * verifikasi berubah, jadi auto-claim undangan butuh nilai ini
+   * sebagai dependensi effect.
+   */
+  emailVerified: boolean;
+  /**
+   * Segarkan klaim sesi lalu kembalikan status verifikasi terbaru.
+   * Dipanggil setelah user mengeklik tautan verifikasi di email.
+   */
+  refreshEmailVerified: () => Promise<boolean>;
   signOutUser: () => Promise<void>;
 }
 
@@ -65,6 +80,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(() => isFirebaseConfigured);
   /** Anti dobel: auto-claim hanya dicoba sekali per akun per sesi. */
   const claimTriedFor = useRef<string | null>(null);
+  /**
+   * Status verifikasi sebagai state terpisah, bukan dibaca dari
+   * `user.emailVerified`, supaya perubahannya memicu re-render dan
+   * effect auto-claim di bawah ikut mengevaluasi ulang.
+   */
+  const [emailVerified, setEmailVerified] = useState(false);
 
   // Status autentikasi (persistensi sesi Firebase).
   useEffect(() => {
@@ -73,6 +94,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const auth = getFirebaseAuth();
     const unsubscribe = onAuthStateChanged(auth, (nextUser) => {
       setUser(nextUser);
+      setEmailVerified(nextUser?.emailVerified ?? false);
       setOwnProfile(null);
       setOwnKey(null);
       setWorkspaceProfile(null);
@@ -132,16 +154,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // Auto-claim undangan pasangan (Phase 2): hanya untuk akun yang belum
   // onboarding solo — saat ownProfile pertama tiba & belum tertaut.
+  //
+  // Syarat email terverifikasi: rules menolak klaim dari akun yang
+  // emailnya belum diverifikasi, jadi mencoba di sini hanya menghasilkan
+  // permission-denied yang swallowed. Dengan checking di sini, akun itu
+  // akan diberi tahu lewat UI (kartu Kolaborasi di Pengaturan) alih-alih
+  // melihat "undangan tidak masuk" tanpa penjelasan.
   useEffect(() => {
     if (!user || !isFirebaseConfigured) return;
     if (ownKey !== user.uid) return; // tunggu snapshot dokumen sendiri dulu
     if (ownProfile?.linkedTo) return; // sudah tertaut
     if (ownProfile?.weddingDate) return; // sudah punya data sendiri (butuh merge)
+    if (!emailVerified) return; // perlu verifikasi dulu, jangan dicoba
     if (claimTriedFor.current === user.uid || !user.email) return;
     claimTriedFor.current = user.uid;
     // Best-effort: gagal (offline/rules) dicoba lagi pada login berikutnya.
     tryAutoClaimInvite(user).catch(() => {});
-  }, [user, ownProfile, ownKey]);
+  }, [user, ownProfile, ownKey, emailVerified]);
 
   const value = useMemo<AuthContextValue>(() => {
     const profile = isLinkedPartner ? workspaceProfile : ownProfile;
@@ -160,6 +189,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       loading,
       profileLoading,
       isOnboarded: Boolean(profile?.weddingDate),
+      emailVerified,
+      refreshEmailVerified: async () => {
+        if (!user) return false;
+        const verified = await refreshAuthClaims(user);
+        setEmailVerified(verified);
+        return verified;
+      },
       signOutUser: async () => {
         if (!isFirebaseConfigured) return;
         await signOut(getFirebaseAuth());
@@ -167,6 +203,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, [
     user,
+    emailVerified,
     ownProfile,
     ownKey,
     workspaceProfile,

@@ -88,11 +88,16 @@ export async function claimInvite(ownerUid: string, user: User): Promise<void> {
  */
 export async function tryAutoClaimInvite(user: User): Promise<boolean> {
   if (!user.email) return false;
+  // Rules menolak klaim dari akun yang emailnya belum diverifikasi, jadi
+  // jangan coba: cek di sini supaya auto-claim dilewati dengan tenang
+  // dan UI bisa memberi penjelasan, bukan gagal diam-diam.
+  if (!user.emailVerified) return false;
   const invite = await findInviteForEmail(user.email);
   if (!invite || invite.uid === user.uid) return false;
-  // Klaim hanya legal bila workspace sudah onboarding dan belum tertaut
-  // ke akun lain.
+  // Klaim hanya legal bila workspace sudah onboarding, undangan masih
+  // hidup, dan belum tertaut ke akun lain.
   if (!invite.data.weddingDate) return false;
+  if (invite.data.coupleStatus !== "invited") return false;
   if (invite.data.partnerUid && invite.data.partnerUid !== user.uid) {
     return false;
   }

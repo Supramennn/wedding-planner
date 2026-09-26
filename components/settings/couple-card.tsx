@@ -53,16 +53,15 @@ export function CoupleCard() {
     findInviteForEmail(user.email)
       .then((invite) => {
         if (cancelled || !invite || invite.uid === user.uid) return;
-        if (invite.data.weddingDate) {
-          setForeignInvite({
-            uid: invite.uid,
-            label:
-              invite.data.email ||
-              invite.data.displayName ||
-              invite.data.partnerName ||
-              "",
-          });
-        }
+        if (!invite.data.weddingDate) return;
+        setForeignInvite({
+          uid: invite.uid,
+          label:
+            invite.data.email ||
+            invite.data.displayName ||
+            invite.data.partnerName ||
+            "",
+        });
       })
       .catch(() => {});
     return () => {
@@ -166,7 +165,9 @@ export function CoupleCard() {
       <CardTitle>Kolaborasi pasangan</CardTitle>
       <CardDescription>
         Satu data pernikahan untuk dua akun — perubahan saling tersinkron
-        realtime (checklist, budget, vendor, dan pengaturan).
+        realtime (checklist, budget, vendor, dan pengaturan). Pasangan perlu
+        memverifikasi emailnya dulu supaya data ini tidak bisa diakses orang
+        lain yang kebetulan tahu alamat emailnya.
       </CardDescription>
 
       {error && (
@@ -214,8 +215,9 @@ export function CoupleCard() {
               Undangan menunggu: {profile?.partnerEmail}
             </p>
             <p className="mt-0.5 text-xs text-rose-700">
-              Minta pasangan daftar/masuk memakai email itu — tautan terjadi
-              otomatis dan seluruh data langsung shared.
+              Minta pasangan daftar dengan email itu. Setelah daftar, dia perlu
+              membuka email verifikasi sekali, lalu seluruh data langsung
+              shared tanpa perlu tautan manual.
             </p>
           </div>
           <Button
@@ -238,7 +240,7 @@ export function CoupleCard() {
             value={email}
             onChange={(event) => setEmail(event.target.value)}
             error={emailError ?? undefined}
-            hint="Pasangan cukup daftar/masuk dengan email ini — tautan otomatis."
+            hint="Pasangan cukup daftar dengan email ini, lalu verifikasi emailnya. Tidak perlu kode atau tautan."
           />
           <Button type="submit" size="md" loading={busy} className="w-full sm:w-auto">
             Kirim undangan
