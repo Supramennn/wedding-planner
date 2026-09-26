@@ -23,7 +23,11 @@ export function Spinner({
       aria-live={label ? "polite" : undefined}
     >
       <svg
-        className={`animate-spin text-current ${SIZE_CLASSES[size]}`}
+        // animate-spin adalah animasi CSS, jadi tidak ikut dimatikan oleh
+        // MotionConfig reducedMotion milik Framer. PRD NFR Accessibility
+        // mewajibkan reduced motion dihormati, maka spin-nya dihentikan
+        // sendiri lewat varian motion-reduce.
+        className={`animate-spin text-current motion-reduce:animate-none ${SIZE_CLASSES[size]}`}
         viewBox="0 0 24 24"
         fill="none"
         aria-hidden="true"
@@ -50,7 +54,9 @@ export function Spinner({
 /** Layar loading penuh (guard rute, first load). */
 export function FullScreenSpinner({ label = "Memuat…" }: { label?: string }) {
   return (
-    <div className="flex min-h-[60svh] items-center justify-center text-neutral-400">
+    // Spinner adalah UI non-teks: butuh rasio 3:1 dari latar (WCAG 1.4.11).
+    // neutral-400 hanya 2.4:1 di #fafafa, neutral-500 mencapai 4.5:1.
+    <div className="flex min-h-[60svh] items-center justify-center text-neutral-500">
       <Spinner size="lg" label={label} />
     </div>
   );

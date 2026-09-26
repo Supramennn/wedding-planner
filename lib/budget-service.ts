@@ -44,12 +44,11 @@ export async function setCategoryAllocation(
   allocatedAmount: number
 ): Promise<void> {
   const refDoc = doc(getDb(), budgetPath(uid), categorySlug(categoryName));
-  // merge:true → field expenses yang sudah ada tidak tertimpa.
-  await setDoc(
-    refDoc,
-    { categoryName, allocatedAmount, expenses: [] },
-    { merge: true }
-  );
+  // expenses SENGAJA tidak ada di payload. merge:true hanya mempertahankan
+  // field yang tidak disebut, jadi menyebut expenses (even as []) akan
+  // menimpa seluruh transaksi kategori ini. Form alokasi hanya boleh
+  // menyentuh categoryName + allocatedAmount.
+  await setDoc(refDoc, { categoryName, allocatedAmount }, { merge: true });
 }
 
 async function readBudgetDoc(
